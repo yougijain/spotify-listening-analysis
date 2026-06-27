@@ -1,0 +1,14 @@
+# Normalize line endings: LF in the repository and on checkout, so the
+# "LF will be replaced by CRLF" warnings go away and the repo is consistent
+# across Windows/macOS/Linux.
+* text=auto eol=lf
+
+# Binary assets — never normalize or diff as text.
+*.png binary
+
+# Keep these explicitly as LF text.
+*.py    text eol=lf
+*.sql   text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf
+*.ipynb text eol=lf
