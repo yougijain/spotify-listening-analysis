@@ -125,7 +125,12 @@ python -m src.run_analysis --no-figures         # numbers only
 ```
 
 The narrative walkthrough lives in
-[`notebooks/analysis.ipynb`](notebooks/analysis.ipynb).
+[`notebooks/analysis.ipynb`](notebooks/analysis.ipynb). To re-execute it:
+
+```bash
+pip install -r requirements-dev.txt
+jupyter nbconvert --to notebook --execute --inplace notebooks/analysis.ipynb
+```
 
 ## Repo structure
 
