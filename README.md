@@ -1,9 +1,7 @@
-# Spotify Listening Analysis — *Wrapped, but honest*
+# Spotify Listening Analysis
 
-A rigorous, **SQL-first** analysis of personal Spotify listening behavior that
-goes past "Spotify Wrapped" to answer the questions Wrapped won't: *how does my
-taste concentrate, how do I discover and abandon artists, and how does my
-listening shift by time and context?*
+*How does my taste concentrate, how do I discover and abandon artists, 
+and how does my listening shift by time and context?*
 
 The hook is **"Wrapped, but honest."** The substance is **product-analyst
 technique** — sessionization, cohort retention, and a hypothesis test — applied
