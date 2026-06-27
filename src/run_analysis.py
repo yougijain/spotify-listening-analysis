@@ -1,0 +1,201 @@
+"""End-to-end runner: build the models, validate them (SPEC §12), render the
+figures, and write REPORT.md.
+
+    python -m src.run_analysis                       # defaults: data/sample, IST, 30-min
+    python -m src.run_analysis --data data/raw       # swap in the real export (Phase 7)
+    python -m src.run_analysis --no-figures          # numbers only
+
+REPORT.md is regenerated from whatever data was loaded, so it always matches the
+current dataset and knob settings.
+"""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+from . import charts
+from .pipeline import build, connect, hypothesis_test, session_gap_sensitivity
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _scalar(con, sql):
+    return con.execute(sql).fetchone()
+
+
+def collect(con) -> dict:
+    m = {}
+    m["raw_total"] = _scalar(con, "SELECT count(*) FROM raw_streams")[0]
+    m["raw_podcast"] = _scalar(con, """
+        SELECT count(*) FROM raw_streams
+        WHERE episode_name IS NOT NULL OR episode_show_name IS NOT NULL""")[0]
+    m["raw_nullname"] = _scalar(con, """
+        SELECT count(*) FROM raw_streams
+        WHERE (episode_name IS NULL AND episode_show_name IS NULL)
+          AND (track_name IS NULL OR artist_name IS NULL)""")[0]
+    m["n_plays"] = _scalar(con, "SELECT count(*) FROM plays")[0]
+    m["n_counted"] = _scalar(con, "SELECT count(*) FROM plays WHERE is_play")[0]
+    m["n_sessions"] = _scalar(con, "SELECT count(*) FROM sessions")[0]
+    m["n_artists"] = _scalar(con, "SELECT count(DISTINCT artist_name) FROM plays")[0]
+    m["date_lo"], m["date_hi"] = _scalar(con, "SELECT min(date_local), max(date_local) FROM plays")
+    m["total_hours"] = _scalar(con, "SELECT sum(ms_played)/3600000.0 FROM plays WHERE is_play")[0]
+
+    m["skip_overall"] = _scalar(con, "SELECT skip_rate FROM skip_overall")[0]
+    m["skip_shuffle"] = _scalar(con, "SELECT skip_rate FROM skip_by_shuffle WHERE shuffle")[0]
+    m["skip_intentional"] = _scalar(con, "SELECT skip_rate FROM skip_by_shuffle WHERE NOT shuffle")[0]
+    m["skip_discovery"] = _scalar(con, "SELECT skip_rate FROM skip_by_familiarity WHERE familiarity='discovery'")[0]
+    m["skip_familiar"] = _scalar(con, "SELECT skip_rate FROM skip_by_familiarity WHERE familiarity='familiar'")[0]
+
+    c = _scalar(con, "SELECT top1pct_share, top10pct_share, hhi, n_artists FROM concentration")
+    m["top1"], m["top10"], m["hhi"], m["conc_artists"] = c
+
+    m["peak"] = _scalar(con, """
+        SELECT day_name, hour_local FROM volume_hour_dow
+        ORDER BY minutes DESC LIMIT 1""")
+    m["busiest_year"] = _scalar(con, "SELECT year, hours FROM yearly_volume ORDER BY hours DESC LIMIT 1")
+    m["discovery_avg"] = _scalar(con, """
+        SELECT avg(new_artists) FROM discovery_monthly
+        WHERE month > (SELECT min(month) FROM discovery_monthly)""")[0]
+    m["binge"] = _scalar(con, "SELECT track_name, artist_name, max_consecutive FROM most_binged LIMIT 1")
+    for k in (1, 3, 6):
+        row = _scalar(con, f"SELECT retention FROM retention_curve WHERE k={k}")
+        m[f"ret_{k}"] = row[0] if row else None
+    m["partial_months"] = [r[0] for r in con.execute(
+        "SELECT strftime(month,'%Y-%m') FROM monthly_volume WHERE is_partial_month ORDER BY month"
+    ).fetchall()]
+    return m
+
+
+def print_validation(con, m, data_dir) -> list:
+    """SPEC §12 checks. Returns the report lines for the QA section too."""
+    lines = []
+    kept = m["raw_total"] - m["raw_podcast"] - m["raw_nullname"]
+    recon_ok = kept == m["n_plays"]
+    lines.append(f"- **Row reconciliation:** {m['raw_total']:,} raw "
+                 f"= {m['n_plays']:,} music plays + {m['raw_podcast']:,} podcasts "
+                 f"+ {m['raw_nullname']:,} null-name dropped "
+                 f"-> {'balanced ✓' if recon_ok else 'MISMATCH ✗'}")
+    lines.append(f"- **Edge months excluded from trends:** {', '.join(m['partial_months']) or 'none'}")
+    peak_day, peak_hr = m["peak"]
+    tz_ok = 6 <= int(peak_hr) <= 23
+    lines.append(f"- **Timezone sanity:** peak listening at {peak_day} {int(peak_hr):02d}:00 local "
+                 f"-> {'plausible ✓' if tz_ok else 'check UTC/local ✗'}")
+
+    sens = session_gap_sensitivity(data_dir)
+    sens_str = "; ".join(f"{int(r.gap_min)}min -> {int(r.n_sessions):,} sessions"
+                         for _, r in sens.iterrows())
+    lines.append(f"- **Session-gap sensitivity:** {sens_str}")
+
+    print("\nValidation (SPEC §12):")
+    for ln in lines:
+        print("  " + ln.replace("**", ""))
+    return lines
+
+
+def write_report(m, h, qa_lines, fig_paths) -> Path:
+    pct = lambda x: f"{x*100:.1f}%"
+    sig = "statistically significant" if h["p_one_sided"] < 0.05 else "not significant"
+    direction = "expanding" if m["discovery_avg"] and m["discovery_avg"] > 0 else "flat"
+    figs = {p.stem: f"figures/{p.name}" for p in fig_paths}
+
+    L = []
+    L.append("# Spotify Listening Analysis — Findings\n")
+    L.append("> Auto-generated by `python -m src.run_analysis`. Numbers below are "
+             "computed from the loaded dataset; re-run to refresh.\n")
+    L.append("## Dataset\n")
+    L.append(f"- **{m['n_plays']:,}** music plays "
+             f"(**{m['n_counted']:,}** counted, ≥30s) across "
+             f"**{m['n_sessions']:,}** sessions and **{m['n_artists']}** artists")
+    L.append(f"- Range **{m['date_lo']} → {m['date_hi']}**, "
+             f"**{m['total_hours']:.0f} hours** of counted listening\n")
+
+    L.append("## Findings\n")
+    L.append(f"1. **Listening volume.** Busiest year was **{int(m['busiest_year'][0])}** "
+             f"(~{m['busiest_year'][1]:.0f} h). Listening peaks **{m['peak'][0]} "
+             f"around {int(m['peak'][1]):02d}:00** local.")
+    L.append(f"   ![volume]({figs['volume_trend']})")
+    L.append(f"   ![heatmap]({figs['hour_dow_heatmap']})\n")
+    L.append(f"2. **Skip rate — the honest number Wrapped never shows: "
+             f"{pct(m['skip_overall'])}.** On shuffle it is **{pct(m['skip_shuffle'])}** "
+             f"vs **{pct(m['skip_intentional'])}** on intentional plays; "
+             f"discovery plays skip at {pct(m['skip_discovery'])} vs "
+             f"{pct(m['skip_familiar'])} for familiar tracks.")
+    L.append(f"   ![skip]({figs['skip_breakdown']})\n")
+    L.append(f"3. **Taste concentration.** The top 10% of artists account for "
+             f"**{pct(m['top10'])}** of listening (top 1%: {pct(m['top1'])}); "
+             f"HHI = **{m['hhi']:.3f}**.")
+    L.append(f"   ![concentration]({figs['concentration']})\n")
+    L.append(f"4. **Discovery.** ~**{m['discovery_avg']:.1f} new artists/month** "
+             f"(taste looks {direction}).")
+    L.append(f"   ![discovery]({figs['discovery_trend']})\n")
+    L.append(f"5. **Artist retention.** Of artists discovered in a month, "
+             f"**{pct(m['ret_1'])}** are still played 1 month later, "
+             f"**{pct(m['ret_3'])}** at 3 months, **{pct(m['ret_6'])}** at 6 months.")
+    L.append(f"   ![retention]({figs['cohort_retention']})\n")
+    L.append(f"6. **Most binged.** *{m['binge'][0]}* by {m['binge'][1]} — "
+             f"**{int(m['binge'][2])}** consecutive plays in one session.\n")
+
+    L.append("## Hypothesis test\n")
+    L.append("**H1: skip rate is higher on shuffle than on intentional plays.**\n")
+    L.append(f"- shuffle {pct(h['shuffle_rate'])} ({h['shuffle_skips']:,}/{h['shuffle_n']:,}) "
+             f"vs intentional {pct(h['intentional_rate'])} "
+             f"({h['intentional_skips']:,}/{h['intentional_n']:,})")
+    L.append(f"- difference **{pct(h['difference'])}**, two-proportion z = "
+             f"**{h['z']:.1f}**, one-sided p = **{h['p_one_sided']:.2e}** ({sig})")
+    L.append(f"- effect size Cohen's h = **{h['cohens_h']:.2f}**")
+    L.append("- *Caveat:* plays are autocorrelated within sessions, so treat this "
+             "as descriptive evidence, not a clean randomized experiment (SPEC §7.3).\n")
+
+    L.append("## Validation (SPEC §12)\n")
+    L.extend(qa_lines)
+    L.append("")
+
+    path = ROOT / "REPORT.md"
+    path.write_text("\n".join(L), encoding="utf-8")
+    return path
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Run the Spotify listening analysis.")
+    ap.add_argument("--data", default="data/sample", help="dir of *.json export files")
+    ap.add_argument("--tz-offset", type=int, default=330, help="home tz offset minutes from UTC")
+    ap.add_argument("--session-gap", type=int, default=30, help="session inactivity gap (min)")
+    ap.add_argument("--no-figures", action="store_true", help="skip figure rendering")
+    args = ap.parse_args()
+
+    # Console output includes a few non-ASCII glyphs (§, ✓, →); make stdout UTF-8
+    # so it prints on a Windows cp1252 terminal too.
+    try:
+        import sys
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    con = connect()
+    n = build(con, args.data, tz_offset_min=args.tz_offset, session_gap_min=args.session_gap)
+    print(f"Loaded {n:,} rows from {args.data}.")
+
+    m = collect(con)
+    h = hypothesis_test(con)
+    print(f"Skip rate overall {m['skip_overall']*100:.1f}% | "
+          f"shuffle {m['skip_shuffle']*100:.1f}% vs intentional {m['skip_intentional']*100:.1f}% "
+          f"(z={h['z']:.1f}, p={h['p_one_sided']:.1e})")
+
+    qa_lines = print_validation(con, m, args.data)
+
+    fig_paths = []
+    if not args.no_figures:
+        fig_paths = charts.render_all(con)
+        print(f"\nRendered {len(fig_paths)} figures to figures/.")
+    else:
+        fig_paths = [Path(f"figures/{n}.png") for n in
+                     ("volume_trend", "hour_dow_heatmap", "skip_breakdown",
+                      "cohort_retention", "discovery_trend", "concentration")]
+
+    report = write_report(m, h, qa_lines, fig_paths)
+    print(f"Wrote {report.relative_to(ROOT)}.")
+
+
+if __name__ == "__main__":
+    main()
