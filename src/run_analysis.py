@@ -152,7 +152,9 @@ def write_report(m, h, qa_lines, fig_paths) -> Path:
     L.append("")
 
     path = ROOT / "REPORT.md"
-    path.write_text("\n".join(L), encoding="utf-8")
+    # newline="\n" keeps REPORT.md as LF on every platform (clean git status).
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(L))
     return path
 
 

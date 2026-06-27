@@ -256,7 +256,10 @@ def main() -> None:
         "Streaming_History_Audio_2022-2024_1.json": events[mid:],
     }
     for fname, rows in chunks.items():
-        (OUT_DIR / fname).write_text(json.dumps(rows, indent=1), encoding="utf-8")
+        # newline="\n" forces LF on every platform so regenerating on Windows
+        # doesn't rewrite the committed sample with CRLF.
+        with open(OUT_DIR / fname, "w", encoding="utf-8", newline="\n") as f:
+            f.write(json.dumps(rows, indent=1))
 
     music = sum(1 for e in events if e["episode_name"] is None)
     print(f"Wrote {len(events):,} events ({music:,} music, "
