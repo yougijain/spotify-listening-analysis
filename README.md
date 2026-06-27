@@ -31,17 +31,6 @@ definitions, not a model. See [`SPEC.md`](SPEC.md) for the full build spec and
 
 ---
 
-## Why this is a data-analyst project
-
-It is deliberately scoped to send a **data-analyst** signal, not an ML one
-(SPEC §2–3):
-
-- **No machine learning** — no clustering, no models, no recommender.
-- **No audio features** — Spotify's audio-features API was deprecated in Nov
-  2024; this runs on richer *behavioral* data instead.
-- Every metric is **defined explicitly** with its threshold and rationale, and
-  every threshold is a documented, tunable knob (SPEC §6).
-
 ## Data
 
 The real source is the **Extended Streaming History** export from Spotify's
@@ -50,15 +39,14 @@ arrives as a `.zip` of `Streaming_History_Audio_*.json`, one row per play event.
 
 The loader ([`src/load.py`](src/load.py)) normalizes both the Extended schema and
 the older "account data" schema onto one clean table, and converts the legacy
-local timestamps to UTC on the way in (SPEC §4.2).
+local timestamps to UTC on the way in.
 
 **Privacy:** real history is personal data and is **never committed** —
-`data/raw/` is gitignored (SPEC §14). Development runs on the synthetic sample.
+`data/raw/` is gitignored. Development runs on the synthetic sample.
 
 ## Method
 
-DuckDB is the analytical core; Python is thin glue for loading and charts
-(SPEC §5). The pipeline is a sequence of SQL files, each building on the last:
+DuckDB is the analytical core; Python is thin glue for loading and charts. The pipeline is a sequence of SQL files, each building on the last:
 
 ```
 raw_streams                       src/load.py        JSON → typed table
