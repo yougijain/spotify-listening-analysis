@@ -1,0 +1,9 @@
+# Spotify Listening Analysis — runtime dependencies.
+# DuckDB is the analytical core; Python is thin glue for loading + charts (SPEC §5.1).
+# Pinned to the versions this project was built and verified against (Python 3.9+).
+
+duckdb>=1.4,<2
+pandas>=2.0,<3
+numpy>=1.24,<3
+matplotlib>=3.8,<4
+scipy>=1.11,<2

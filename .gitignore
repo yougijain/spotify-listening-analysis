@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# Personal data — NEVER commit. The real Extended Streaming History export
+# is private listening history and lives only in data/raw/ (see SPEC §14).
+# ---------------------------------------------------------------------------
+data/raw/*
+!data/raw/.gitkeep
+
+# DuckDB database files / build artifacts
+build/
+*.duckdb
+*.duckdb.wal
+*.db
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
