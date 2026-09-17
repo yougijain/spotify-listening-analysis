@@ -1,7 +1,11 @@
-# Dev-only dependencies — needed to execute / re-render notebooks/analysis.ipynb.
+# Dev-only dependencies: tests, linting, and notebook execution.
 # Not required to run the analysis itself (that's requirements.txt).
 #   pip install -r requirements.txt -r requirements-dev.txt
 
+pytest>=8,<9
+ruff>=0.6,<1
+
+# Needed only to re-execute / re-render notebooks/analysis.ipynb.
 nbconvert>=7,<8
 ipykernel>=6,<7
 nbformat>=5,<6

@@ -8,26 +8,41 @@ just sequences them and exposes small helpers the runner and notebook share.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 import pandas as pd
 from scipy import stats
 
+from . import stats as st
+from .enrich import (
+    CoverageReport,
+    build_provider_chain,
+    load_camelot_moves,
+    load_track_features,
+)
 from .load import load_streams
 
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
-SQL_FILES = [
+# The SQL runs in two blocks. Everything before enrichment works on the
+# listening history alone; everything after can also see musical features, which
+# have to come in through Python because the history<->library join is fuzzy.
+SQL_BEFORE_ENRICH = [
     "01_clean.sql",
     "02_sessions.sql",
+]
+SQL_AFTER_ENRICH = [
     "03_metrics.sql",
     "04_cohorts.sql",
     "05_hypothesis.sql",
+    "06_crate.sql",
+    "07_transitions.sql",
 ]
+SQL_FILES = SQL_BEFORE_ENRICH + SQL_AFTER_ENRICH
 
 
-def connect(db_path: Optional[str] = None) -> duckdb.DuckDBPyConnection:
+def connect(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(db_path) if db_path else duckdb.connect()
 
 
@@ -57,24 +72,51 @@ def run_sql_file(con: duckdb.DuckDBPyConnection, name: str) -> None:
     _run_script(con, (SQL_DIR / name).read_text(encoding="utf-8"))
 
 
+@dataclass
+class BuildResult:
+    """What a build produced, for the runner's QA section."""
+
+    rows_loaded: int
+    coverage: CoverageReport
+    providers: tuple
+
+
 def build(
     con: duckdb.DuckDBPyConnection,
     data_dir: str,
     tz_offset_min: int = 330,
     session_gap_min: int = 30,
-) -> int:
-    """Load data and materialize every model. Returns rows loaded.
+    burn_half_life_days: float = 60.0,
+    features_file: str | None = None,
+    allow_synthetic_features: bool = True,
+) -> BuildResult:
+    """Load data, enrich it, and materialize every model.
 
-    The two knobs (home-tz offset, session gap) are injected by overriding the
-    macros before the SQL runs; the SQL files keep IF NOT EXISTS defaults so they
-    still work standalone in the DuckDB CLI.
+    The knobs (home-tz offset, session gap, burn half-life) are injected by
+    overriding macros before the SQL runs; the SQL files keep IF NOT EXISTS
+    defaults so they still work standalone in the DuckDB CLI.
+
+    Enrichment happens between the two SQL blocks because the history-to-library
+    join is fuzzy string matching, which belongs in Python (src/enrich.py), and
+    everything from 06 onward needs its output.
     """
     n = load_streams(con, data_dir, home_offset_minutes=tz_offset_min)
     con.execute(f"CREATE OR REPLACE MACRO to_local(t) AS t + INTERVAL {int(tz_offset_min)} MINUTE")
     con.execute(f"CREATE OR REPLACE MACRO session_gap() AS INTERVAL {int(session_gap_min)} MINUTE")
-    for name in SQL_FILES:
+    con.execute(f"CREATE OR REPLACE MACRO burn_half_life() AS {float(burn_half_life_days)}")
+
+    for name in SQL_BEFORE_ENRICH:
         run_sql_file(con, name)
-    return n
+
+    chain = build_provider_chain(data_dir, features_file, allow_synthetic_features)
+    coverage = load_track_features(con, chain)
+    load_camelot_moves(con)
+
+    for name in SQL_AFTER_ENRICH:
+        run_sql_file(con, name)
+
+    return BuildResult(rows_loaded=n, coverage=coverage,
+                       providers=tuple(p.name for p in chain))
 
 
 def hypothesis_test(con: duckdb.DuckDBPyConnection) -> dict:
@@ -121,3 +163,53 @@ def session_gap_sensitivity(data_dir: str, gaps=(15, 30, 45)) -> pd.DataFrame:
                      "mean_plays_per_session": mean_plays})
         con.close()
     return pd.DataFrame(rows)
+
+
+def harmonic_hypothesis_test(con: duckdb.DuckDBPyConnection) -> st.CMHResult:
+    """H2: a clashing transition loses the incoming track more often (SPEC §16.5).
+
+    Stratified on shuffle rather than pooled. Shuffle is a common cause of both
+    sides of this comparison — it raises the skip rate and it produces more
+    clashes — so pooling would hand shuffle's skips to bad harmony and overstate
+    the effect. The returned object carries the pooled comparison too, so the
+    report can show how much the confound was actually worth.
+    """
+    rows = con.execute("""
+        SELECT shuffle, is_harmonic, n_trials, n_skips
+        FROM hypothesis_harmonic_skip
+    """).fetchall()
+
+    strata = []
+    for shuffle in (False, True):
+        arm = {bool(h): (int(n), int(x)) for s, h, n, x in rows if bool(s) is shuffle}
+        if True not in arm or False not in arm:
+            continue
+        n_clash, x_clash = arm[False]      # exposed = harmonically incompatible
+        n_clean, x_clean = arm[True]       # control = compatible
+        strata.append(st.Stratum(
+            label="shuffle" if shuffle else "intentional",
+            x_exposed=x_clash, n_exposed=n_clash,
+            x_control=x_clean, n_control=n_clean,
+        ))
+    return st.cochran_mantel_haenszel(strata)
+
+
+def tempo_hypothesis_test(con: duckdb.DuckDBPyConnection) -> st.CMHResult:
+    """The same question asked of tempo: does a jump past the fader cost you?"""
+    rows = con.execute("""
+        SELECT shuffle, tempo_jump, n_trials, n_skips FROM hypothesis_tempo_skip
+    """).fetchall()
+
+    strata = []
+    for shuffle in (False, True):
+        arm = {bool(j): (int(n), int(x)) for s, j, n, x in rows if bool(s) is shuffle}
+        if True not in arm or False not in arm:
+            continue
+        n_jump, x_jump = arm[True]
+        n_close, x_close = arm[False]
+        strata.append(st.Stratum(
+            label="shuffle" if shuffle else "intentional",
+            x_exposed=x_jump, n_exposed=n_jump,
+            x_control=x_close, n_control=n_close,
+        ))
+    return st.cochran_mantel_haenszel(strata)
