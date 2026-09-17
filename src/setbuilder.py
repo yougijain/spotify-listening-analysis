@@ -202,6 +202,25 @@ def _slots_for(target_minutes: float, tracks: Sequence[Track]) -> int:
     return max(2, min(len(tracks), round(target_minutes / avg)))
 
 
+def base_transition_score(a: Track, b: Track, proven: float = 0.0) -> float:
+    """The part of a transition's score that does not depend on where it lands.
+
+    Split out because the static dashboard needs it: only the energy-arc term
+    varies with position, so the browser can precompute everything else as a
+    weighted graph and add the one position-dependent term while it searches.
+    That keeps the domain scoring here, in tested Python, with the browser doing
+    nothing more than walking a graph. tests/test_web_export.py asserts the two
+    halves still add up to :func:`score_transition`.
+    """
+    return (
+        W_HARMONIC * harmonic_score(a.key, b.key)
+        + W_TEMPO * bpm_score(a.bpm, b.bpm)
+        + W_CONTINUITY * energy_continuity(a.energy, b.energy)
+        + W_QUALITY * b.set_readiness
+        + W_PROVEN * proven
+    )
+
+
 def score_transition(
     a: Track,
     b: Track,
@@ -221,14 +240,7 @@ def score_transition(
     continuity = energy_continuity(a.energy, b.energy)
     quality = b.set_readiness
 
-    total_score = (
-        W_HARMONIC * harmonic
-        + W_TEMPO * tempo
-        + W_ENERGY * energy_fit
-        + W_CONTINUITY * continuity
-        + W_QUALITY * quality
-        + W_PROVEN * proven
-    )
+    total_score = base_transition_score(a, b, proven) + W_ENERGY * energy_fit
     move = classify_move(a.key, b.key) if (a.key and b.key) else None
     delta = _bpm_delta_or_none(a.bpm, b.bpm)
     return Transition(a.track_key, b.track_key, total_score, harmonic, tempo,

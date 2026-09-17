@@ -34,6 +34,7 @@ against the other track's tempo and its half- and double-time, best match wins.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -283,8 +284,11 @@ ARCS = {
     "warmup": lambda t: 0.30 + 0.35 * t,
     # Prime time: straight in high, small lift, no dips.
     "peak": lambda t: 0.75 + 0.20 * t,
-    # Full night in one set: rise, breathe in the middle, rise higher.
-    "journey": lambda t: 0.40 + 0.45 * t + 0.18 * (-1.0 if 0.35 < t < 0.6 else 0.0),
+    # Full night in one set: rise, breathe in the middle, rise higher. The dip
+    # is a Gaussian rather than a step — a target energy that teleports by 0.18
+    # at one slot boundary is not a thing a room experiences, and it also makes
+    # the curve safe to sample and interpolate (see src/export_web.py).
+    "journey": lambda t: 0.40 + 0.45 * t - 0.18 * math.exp(-(((t - 0.47) / 0.12) ** 2)),
     # Last hour: come down deliberately instead of falling off a cliff.
     "closing": lambda t: 0.85 - 0.45 * t,
 }
