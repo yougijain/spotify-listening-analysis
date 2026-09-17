@@ -144,6 +144,32 @@ class CMHResult:
     def significant(self) -> bool:
         return self.p_value < 0.05
 
+    @property
+    def crude_odds_ratio(self) -> float:
+        """The odds ratio you get by ignoring the strata and pooling.
+
+        Reported next to the adjusted one so the confound has a size rather
+        than just a mention: the gap between the two IS what stratifying bought.
+        """
+        a = sum(s.x_exposed for s in self.strata)
+        b = sum(s.n_exposed - s.x_exposed for s in self.strata)
+        c = sum(s.x_control for s in self.strata)
+        d = sum(s.n_control - s.x_control for s in self.strata)
+        if 0 in (b, c):
+            return math.inf if a and d else float("nan")
+        return (a * d) / (b * c)
+
+    @property
+    def confounding_pct(self) -> float:
+        """How far the crude estimate is off, as a percentage of the adjusted.
+
+        Over ~10% is the conventional threshold for calling a variable a
+        confounder worth adjusting for.
+        """
+        if not math.isfinite(self.crude_odds_ratio) or self.odds_ratio in (0, math.inf):
+            return float("nan")
+        return 100.0 * (self.crude_odds_ratio - self.odds_ratio) / self.odds_ratio
+
 
 def cochran_mantel_haenszel(strata: Sequence[Stratum]) -> CMHResult:
     """Test exposure-outcome association, holding the strata fixed.

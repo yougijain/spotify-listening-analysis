@@ -164,3 +164,53 @@ def session_gap_sensitivity(data_dir: str, gaps=(15, 30, 45)) -> pd.DataFrame:
                      "mean_plays_per_session": mean_plays})
         con.close()
     return pd.DataFrame(rows)
+
+
+def harmonic_hypothesis_test(con: duckdb.DuckDBPyConnection) -> st.CMHResult:
+    """H2: a clashing transition loses the incoming track more often (SPEC §8.5).
+
+    Stratified on shuffle rather than pooled. Shuffle is a common cause of both
+    sides of this comparison — it raises the skip rate and it produces more
+    clashes — so pooling would hand shuffle's skips to bad harmony and overstate
+    the effect. The returned object carries the pooled comparison too, so the
+    report can show how much the confound was actually worth.
+    """
+    rows = con.execute("""
+        SELECT shuffle, is_harmonic, n_trials, n_skips
+        FROM hypothesis_harmonic_skip
+    """).fetchall()
+
+    strata = []
+    for shuffle in (False, True):
+        arm = {bool(h): (int(n), int(x)) for s, h, n, x in rows if bool(s) is shuffle}
+        if True not in arm or False not in arm:
+            continue
+        n_clash, x_clash = arm[False]      # exposed = harmonically incompatible
+        n_clean, x_clean = arm[True]       # control = compatible
+        strata.append(st.Stratum(
+            label="shuffle" if shuffle else "intentional",
+            x_exposed=x_clash, n_exposed=n_clash,
+            x_control=x_clean, n_control=n_clean,
+        ))
+    return st.cochran_mantel_haenszel(strata)
+
+
+def tempo_hypothesis_test(con: duckdb.DuckDBPyConnection) -> st.CMHResult:
+    """The same question asked of tempo: does a jump past the fader cost you?"""
+    rows = con.execute("""
+        SELECT shuffle, tempo_jump, n_trials, n_skips FROM hypothesis_tempo_skip
+    """).fetchall()
+
+    strata = []
+    for shuffle in (False, True):
+        arm = {bool(j): (int(n), int(x)) for s, j, n, x in rows if bool(s) is shuffle}
+        if True not in arm or False not in arm:
+            continue
+        n_jump, x_jump = arm[True]
+        n_close, x_close = arm[False]
+        strata.append(st.Stratum(
+            label="shuffle" if shuffle else "intentional",
+            x_exposed=x_jump, n_exposed=n_jump,
+            x_control=x_close, n_control=n_close,
+        ))
+    return st.cochran_mantel_haenszel(strata)

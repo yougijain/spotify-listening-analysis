@@ -307,6 +307,7 @@ def build_set(
     proven_edges: Optional[dict] = None,
     beam_width: int = DEFAULT_BEAM_WIDTH,
     branching: int = DEFAULT_BRANCHING,
+    _include_greedy: bool = True,
 ) -> SetPlan:
     """Sequence a set from the crate by beam search.
 
@@ -317,6 +318,13 @@ def build_set(
     Returns the best plan found. A crate too small or too constrained to fill
     the target simply returns a shorter set rather than failing — a 40-minute
     set is a usable answer, a crash is not.
+
+    Beam search does not dominate greedy for free: pruning ranks partial sets on
+    what they have scored so far, so a prefix that pays off late can be dropped.
+    On the sample crate this cost the closing arc 0.001 against greedy. Since
+    "the smarter search is at least as good" is a property callers will assume,
+    the width-1 chain is computed as well and the better of the two returned —
+    one extra cheap pass to make the guarantee real rather than usually true.
     """
     if not tracks:
         return SetPlan()
@@ -362,7 +370,16 @@ def build_set(
         beams = _dedupe(nxt)[:beam_width]
 
     best = max(beams, key=lambda b: b.score / max(1, len(b.transitions)))
-    return SetPlan(tracks=best.tracks, transitions=best.transitions)
+    plan = SetPlan(tracks=best.tracks, transitions=best.transitions)
+
+    if _include_greedy and beam_width > 1:
+        greedy = build_set(
+            tracks, target_minutes, arc, seed_key, constraints, proven_edges,
+            beam_width=1, branching=1, _include_greedy=False,
+        )
+        if greedy.mean_score > plan.mean_score:
+            return greedy
+    return plan
 
 
 def _dedupe(beams: Sequence[_Beam]) -> list:
@@ -532,6 +549,7 @@ def build_set_greedy(tracks: Sequence[Track], **kwargs) -> SetPlan:
     """Beam width 1. The thing beam search has to beat to justify itself."""
     kwargs["beam_width"] = 1
     kwargs["branching"] = 1
+    kwargs["_include_greedy"] = False
     return build_set(tracks, **kwargs)
 
 
@@ -594,9 +612,9 @@ class Evaluation:
 
     def summary(self) -> str:
         return (f"beam {self.beam:.3f} | greedy {self.greedy:.3f} "
-                f"(+{self.lift_over_greedy:.3f}) | random {self.random_mean:.3f} "
+                f"({self.lift_over_greedy:+.3f}) | random {self.random_mean:.3f} "
                 f"best-of-{self.random_trials} {self.random_best:.3f} "
-                f"(+{self.lift_over_random:.3f}) | harmonic "
+                f"({self.lift_over_random:+.3f}) | harmonic "
                 f"{self.beam_harmonic_rate:.0%} vs {self.random_harmonic_rate:.0%}")
 
 

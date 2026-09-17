@@ -433,3 +433,13 @@ def test_arc_deviation_and_max_step_handle_missing_energy():
     p = SetPlan(tracks=[track("a", energy=None), track("b", energy=None)])
     assert p.arc_deviation("peak") == 0.0
     assert p.max_energy_step() == 0.0
+
+
+def test_beam_never_loses_to_greedy_on_the_real_crate(con):
+    """Regression: on the sample crate's closing arc the raw beam scored 0.001
+    below greedy, because pruning can drop a prefix that pays off late."""
+    crate = load_crate(con)
+    for arc in ("warmup", "peak", "journey", "closing"):
+        ev = evaluate(crate, 60, arc, proven_edges=load_proven_edges(con),
+                      random_trials=3)
+        assert ev.beam >= ev.greedy - 1e-12, f"{arc}: beam {ev.beam} < greedy {ev.greedy}"
