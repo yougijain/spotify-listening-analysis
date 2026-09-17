@@ -1,6 +1,6 @@
 """Precompute every number the static dashboard needs, as JSON.
 
-Hosting decision (SPEC §10)
+Hosting decision (SPEC §18)
 ---------------------------
 The dashboard is a static page. There is no API, no database behind it and no
 server-side Python, because nothing about this project needs one: the analysis

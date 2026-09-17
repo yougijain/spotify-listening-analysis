@@ -10,7 +10,7 @@ Three things live here, in increasing order of how much they matter:
 
 * :func:`two_proportion_z` — the shuffle-vs-intentional test (SPEC §7.3).
 
-* :func:`cochran_mantel_haenszel` — the harmonic test (SPEC §8.5), which needs
+* :func:`cochran_mantel_haenszel` — the harmonic test (SPEC §16.5), which needs
   more care than a pooled comparison. Shuffle raises the skip rate *and*
   produces more clashing transitions, so it is a common cause of both variables:
   pooling everything would credit shuffle's skips to bad harmony. CMH tests the

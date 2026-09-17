@@ -166,7 +166,7 @@ def session_gap_sensitivity(data_dir: str, gaps=(15, 30, 45)) -> pd.DataFrame:
 
 
 def harmonic_hypothesis_test(con: duckdb.DuckDBPyConnection) -> st.CMHResult:
-    """H2: a clashing transition loses the incoming track more often (SPEC §8.5).
+    """H2: a clashing transition loses the incoming track more often (SPEC §16.5).
 
     Stratified on shuffle rather than pooled. Shuffle is a common cause of both
     sides of this comparison — it raises the skip rate and it produces more

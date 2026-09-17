@@ -362,3 +362,231 @@ Be ready to answer, cold:
 - Static HTML dashboard (filters by year/artist; the heatmap and trends).
 - Compare two eras of your listening (e.g., pre/post a life change).
 - Per-platform behavioral differences (mobile vs. desktop skip rates).
+
+---
+
+# Part II — Crate intelligence
+
+*Added after the listening-analysis core shipped. §1–15 describe a personal
+analytics project; this half describes what makes it a DJ tool, and it is where
+the design decisions that actually needed arguing live.*
+
+## 16. From listening metrics to booth decisions
+
+### 16.1 Positioning
+
+The spine in §7 answers "how do I listen". A DJ needs three narrower answers,
+and each one reuses a spine metric with a changed definition:
+
+| Spine metric (§7) | Booth question | What has to change |
+|---|---|---|
+| Skip rate | Will this clear the floor? | Raw rates are unusable for *ranking* at small n — every rate becomes a Wilson lower bound |
+| Cohort retention | Does a new artist survive rotation? | Unchanged; it was already the right shape |
+| Play recency | Have I over-rotated this? | New: exponentially-weighted play load, percent-ranked |
+| Sessionization | Which mixes have I played? | New: a directed transition graph with a survival outcome |
+
+The harmonic domain model (Camelot wheel, tempo reachability, energy arcs) is
+**pure and separately testable** (`src/harmonic.py`), with no DuckDB or I/O, so
+every mixing rule can be argued with in isolation from the pipeline.
+
+### 16.2 Non-goals (unchanged in spirit from §3)
+
+- No audio DSP. No beatgrid detection, no key detection from waveforms. The
+  features come from software that already does this properly.
+- No recommender. Nothing here predicts what you *will* like; it sequences what
+  you already own.
+- No learned model. Objective weights are stated judgement calls, in one place,
+  not fitted parameters dressed up as findings.
+
+### 16.3 Musical features: the provider chain
+
+**The constraint that shaped this section.** Spotify restricted
+`/v1/audio-features` and `/v1/audio-analysis` to existing applications in
+November 2024. A project started after that cannot obtain tempo or key from the
+API. Any design that assumes otherwise is describing a system that cannot be
+built today.
+
+Features therefore come from a chain of providers, first hit wins
+(`src/enrich.py`):
+
+1. `CsvFeatureProvider` — Mixed In Key / Rekordbox / Traktor export. The real
+   path: a working DJ's library is already analysed, on their own disk. Column
+   names are resolved against per-tool aliases rather than a fixed schema.
+2. `SyntheticFeatureProvider` — deterministic stand-ins (BLAKE2b over the match
+   key, so identical across runs, machines and Python versions, unlike `hash()`
+   which is per-process salted). Tagged as its own source and counted separately
+   in the coverage report so it can never be read as a measurement.
+
+A third provider is one method. Nothing downstream changes.
+
+**The join.** A feature export carries `Artist` and `Title` strings; the history
+carries those plus a URI. There is no shared identifier, so matching is fuzzy by
+necessity. `match_key()` folds accents, punctuation, and *version* suffixes
+(`Remastered 2011`, `Radio Edit`, `Original Mix`) but deliberately **not**
+`Live` or `Acoustic` — those are different recordings with different tempos, and
+collapsing them attaches the wrong BPM to real plays. Apostrophes are deleted
+rather than spaced so `Don't` matches `Dont`.
+
+Coverage is reported on every run. An unmatched track is a visible number, not a
+silent NULL.
+
+### 16.4 The crate model (`sql/06_crate.sql`)
+
+Three questions per track.
+
+**Does it hold?** `hold_lcb` = Wilson lower bound on the non-skip rate. The
+naive rate is actively misleading for ranking: a track played twice and never
+skipped scores 1.0 and tops the crate on no evidence. The bound shrinks thin
+samples, so "probably good, watched 200 times" beats "flawless across two".
+
+**Is it burned?** `rotation_burn` = exponentially-weighted recent play count
+(60-day half-life — roughly a residency's memory), then **percent-ranked across
+the crate**, because staleness only means anything relative to everything else
+you own.
+
+**Do I know?** `n_plays`, surfaced as an `unproven` status below a threshold
+rather than hidden inside a score.
+
+`set_readiness` = `0.60 · hold_lcb + 0.40 · (1 − rotation_burn)`. Weighted toward
+holding, because a stale banger still works and a floor-killer never does.
+
+> **A finding worth stating, since the chart contradicts the intuition:** the
+> burned tracks have *high* hold rates. Reliability is what earns a track its
+> overplay. "Rest these" is a freshness call, not a quality judgement, and any
+> UI that implies otherwise is lying about its own data.
+
+### 16.5 Does harmony hold the listener? (`sql/07_transitions.sql`)
+
+**H2: a harmonically incompatible transition loses the incoming track more
+often than a compatible one.**
+
+- **Unit:** an ordered in-session pair A→B. Same-track repeats are excluded — a
+  track following itself is a replay, not a mix, and counting it would stuff the
+  "same key" bucket with something no DJ would call a transition.
+- **Outcome:** `to_is_skip`. The closest thing streaming data has to *the
+  transition did not work*.
+- **Exposure:** the Camelot move, via a 24×24 lookup **generated from
+  `src/harmonic.py`** rather than reimplemented in SQL. 576 rows is nothing, and
+  it makes drift between the two implementations structurally impossible instead
+  of something a parity test catches after the fact.
+
+**Why this is not a two-proportion z-test.** Shuffle raises the skip rate *and*
+produces more clashing transitions — it is a common cause of both variables.
+Pooling hands shuffle's skips to bad harmony. On the sample this is not a
+hypothetical: the crude odds ratio is 2.35 against an adjusted 1.70, so pooling
+**overstates the effect by 38%**.
+
+The test is Cochran–Mantel–Haenszel stratified on shuffle, with a
+Mantel–Haenszel common odds ratio and a Robins–Breslow–Greenland interval
+(`src/stats.py`), verified against `statsmodels.StratifiedTable` to six decimal
+places and pinned in the tests. A Simpson's-paradox case is a regression test,
+because that is the exact failure mode being defended against.
+
+**Honest limitation, stated up front:** the committed sample's generator queues
+harmonically-adjacent tracks on purpose and skips more on a clash. The test is
+therefore *guaranteed* to find an effect on sample data. What it demonstrates is
+the measurement machinery. The experiment is running it against a real export.
+
+---
+
+## 17. Set construction
+
+### 17.1 The problem
+
+Given a crate, a target duration and an energy shape, produce a playable
+ordering. This is constrained sequencing, not a sort.
+
+### 17.2 Objective and constraints (`src/setbuilder.py`)
+
+Each A→B step scores on five weighted components summing to 1:
+
+| component | weight | what it asks |
+|---|---:|---|
+| harmonic | 0.30 | does the Camelot move work |
+| tempo | 0.20 | reachable through a ±6% fader (half/double-time allowed) |
+| energy | 0.20 | does B sit where the arc wants this slot |
+| continuity | 0.12 | is the step from A survivable |
+| quality | 0.18 | is B worth playing (`set_readiness`) |
+
+plus `0.10 ×` an observed-hold bonus for pairs already played back-to-back.
+Small on purpose: it breaks ties, it does not override musical scoring, because
+listening history reflects habits rather than dancefloor results.
+
+**Continuity earns its place.** An objective scoring only distance-from-target
+will happily drop 0.9 → 0.2 → 0.9 if each track individually sits near the arc.
+On a floor that reads as the set falling over. Arc fit is a *shape* constraint;
+continuity is a *local* one, and both are needed.
+
+**Hard constraints reject rather than penalise:** no repeats, no artist inside a
+3-track gap, no tempo jump past the fader. Folding these into the score would
+let a high enough harmonic score buy its way past a rule.
+
+**Beam search, not greedy,** because greedy fails predictably — it takes the best
+transition available now and strands itself in a corner of the wheel with
+nothing that mixes out. Beams are deduplicated by track sequence; without that
+the width collapses and it quietly degrades back into greedy. The width-1 chain
+is computed alongside and the better of the two returned, so "the smarter search
+is at least as good" is a guarantee rather than usually true.
+
+### 17.3 Validating the optimiser
+
+"It works" needs a number. `evaluate()` benchmarks every arc against greedy and
+200 constraint-respecting random orderings (not a strawman — the random baseline
+honours the same hard constraints, so it is "what you get from shuffling a crate
+you already curated").
+
+Result on the sample: **100% harmonic transitions against 17% for random**, but
+the lift over greedy is ~0.02. **Most of the gain is the objective and the hard
+constraints, not the lookahead.** That is worth reporting plainly.
+
+### 17.4 Arc feasibility — can the crate do this at all?
+
+Before blaming the sequencer for missing an arc, ask whether the material
+exists. `arc_feasibility()` measures, slot by slot, how many candidates sit
+within tolerance of that slot's energy target.
+
+**The version that only counted energy was wrong**, and usefully so. It reported
+the crate as well-supplied for a warmup while the built set missed its arc by
+0.30, because the quiet tracks *do* exist — they are downtempo, and you cannot
+reach 92 BPM from a 137 BPM floor through a ±8% fader. **Energy and tempo are
+correlated in any real crate**, so a slot is only supplied if its candidates are
+also tempo-reachable.
+
+With reachability included the diagnostic discriminates (warmup 70% vs peak
+100%) and predicts the built set's arc miss (0.30 vs 0.07); there is a test
+asserting that relationship. "This crate cannot open a night" is therefore a
+finding the tool reports, not a defect it hides.
+
+---
+
+## 18. Hosting and delivery
+
+**Decision: a static site, no backend.** The analysis is a batch job over a
+fixed export, so its output is computed once at build time and shipped as files.
+That buys a free host, no cold starts, no secrets in an environment, and nothing
+that can fall over unattended. Vercel is the primary host (`vercel.json`); a
+GitHub Pages workflow sits alongside so the site is not tied to one vendor.
+
+**The one thing that must be interactive is the set builder** — a page of
+pre-rendered setlists is a screenshot, not a tool. So the browser runs the beam
+search itself.
+
+**Keeping the domain model single-sourced.** Every component of a transition's
+score except the energy-arc term is position-independent, so it is precomputed
+per edge (`base_transition_score`) and shipped as a weighted graph capped at 24
+candidates per node. The client adds one term and walks the graph. Arc curves
+ship as 101 sampled points rather than formulas transcribed into JS, because a
+sample cannot drift from its source and a transcription can.
+
+`tests/test_web_export.py` holds that contract: base plus arc term must
+reconstruct the full score, interpolated samples must land within 1e-3 of
+`arc_target`, and every exported edge weight must equal what Python computes.
+
+**Reproducibility is a CI gate.** `data/sample` and `web/data` are both
+committed, and CI diffs each against what its generator produces. Enforcing that
+surfaced a real defect: unordered `GROUP BY` and a missing `ORDER BY` in
+`load_crate` made the export non-reproducible across builds — and since row
+order in `crate.json` *is* the node numbering of the transition graph, a rebuild
+could renumber every node.
+
+Payload: 132 KB for ~7,700 plays.

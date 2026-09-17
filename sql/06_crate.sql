@@ -1,5 +1,5 @@
 -- 06_crate.sql  ·  the crate: every track scored for whether it earns a slot
--- See SPEC §8.4. Depends on `session_plays` (02) and `track_features` (enrich).
+-- See SPEC §16.4. Depends on `session_plays` (02) and `track_features` (enrich).
 --
 -- This is the file that turns listening analytics into DJ decisions. The three
 -- questions a crate has to answer before a gig are:

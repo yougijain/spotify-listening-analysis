@@ -156,7 +156,7 @@ def concentration(con: duckdb.DuckDBPyConnection) -> Path:
 
 
 
-# --- DJ figures (SPEC §8-9) -------------------------------------------------
+# --- DJ figures (SPEC §16-17) -------------------------------------------------
 
 # A second accent for the DJ-side charts, so crate/transition figures read as a
 # distinct family from the listening-behaviour ones.
@@ -342,7 +342,7 @@ def render_all(con: duckdb.DuckDBPyConnection) -> list:
         # Listening behaviour (SPEC §7)
         volume_trend(con), hour_dow_heatmap(con), skip_breakdown(con),
         cohort_retention(con), discovery_trend(con), concentration(con),
-        # Crate and set construction (SPEC §8-9)
+        # Crate and set construction (SPEC §16-17)
         camelot_wheel(con), transition_performance(con), crate_health(con),
         tempo_bands(con), set_energy_arc(con),
     ]

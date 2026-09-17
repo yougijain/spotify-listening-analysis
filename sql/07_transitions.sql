@@ -1,5 +1,5 @@
 -- 07_transitions.sql  ·  the transition graph mined from real session history
--- See SPEC §8.5. Depends on `session_plays` (02), `track_features` and
+-- See SPEC §16.5. Depends on `session_plays` (02), `track_features` and
 -- `camelot_moves` (both loaded by src/enrich.py).
 --
 -- A crate tells you what to play. A transition graph tells you what to play
@@ -9,7 +9,7 @@
 --
 -- The outcome variable is `to_is_skip` -- did the incoming track get skipped
 -- past? That is the closest thing in streaming data to "the transition did not
--- work", and it is what the §8.5 hypothesis test is built on.
+-- work", and it is what the §16.5 hypothesis test is built on.
 
 -- Every observed A -> B pair inside a session, with both sides' features.
 CREATE OR REPLACE TABLE transitions AS
@@ -104,7 +104,7 @@ FROM transitions
 WHERE move IS NOT NULL
 GROUP BY move;
 
--- Inputs for the stratified hypothesis test (SPEC §8.5).
+-- Inputs for the stratified hypothesis test (SPEC §16.5).
 --
 -- Stratifying on `shuffle` is the whole point. Shuffle raises the skip rate AND
 -- produces more clashing transitions, so it is a common cause of both sides of

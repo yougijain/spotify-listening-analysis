@@ -6,7 +6,7 @@ constraints, not a sort.
 
 The objective
 -------------
-Every transition A -> B is scored on four things, weighted (SPEC §9.2):
+Every transition A -> B is scored on four things, weighted (SPEC §17.2):
 
     harmonic    do the keys mix                      (Camelot move score)
     tempo       can I pitch one into the other       (+/- 6% fader, half/double ok)

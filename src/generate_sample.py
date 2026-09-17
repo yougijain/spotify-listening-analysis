@@ -19,11 +19,11 @@ Two artefacts come out of this, mirroring what a DJ actually has on disk:
    carries **no** musical features (no BPM, no key). Nothing is smuggled in.
 2. ``crate_features.csv`` — a Mixed In Key / Rekordbox-shaped side-car. This is
    where BPM/key/energy come from in the real world too, because Spotify's
-   audio-features endpoint was closed to new apps in Nov 2024 (SPEC §8.3).
+   audio-features endpoint was closed to new apps in Nov 2024 (SPEC §16.3).
 
 **On the harmonic effect being "found" later:** the sequencer below deliberately
 queues harmonically-adjacent tracks more often than chance and skips more on a
-clash. So the hypothesis test in §8.5 is *guaranteed* to find an effect here —
+clash. So the hypothesis test in §16.5 is *guaranteed* to find an effect here —
 it demonstrates the measurement machinery, not a discovery. The real experiment
 is running it against a real export.
 
@@ -249,7 +249,7 @@ HARMONIC_INTENT_P = 0.55
 # Candidates considered when making such a pick.
 CANDIDATE_POOL = 12
 # Extra skip probability when a transition clashes / jumps tempo. These two
-# numbers ARE the effect the §8.5 hypothesis test recovers.
+# numbers ARE the effect the §16.5 hypothesis test recovers.
 CLASH_SKIP_PENALTY = 0.10
 TEMPO_SKIP_PENALTY = 0.08
 
@@ -371,7 +371,7 @@ def inject_edge_rows(rng, artists, events):
 
 
 def write_crate_features(artists, out_dir: Path) -> Path:
-    """Write the Mixed In Key / Rekordbox-shaped side-car (SPEC §8.3).
+    """Write the Mixed In Key / Rekordbox-shaped side-car (SPEC §16.3).
 
     Deliberately *not* a perfect mirror of the listening history: a real DJ's
     analysed library never covers everything they have streamed, so a slice of

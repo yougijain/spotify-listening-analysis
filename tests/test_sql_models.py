@@ -260,7 +260,7 @@ def test_harmonic_strata_total_matches_the_tagged_transitions(con):
 
 
 def test_shuffle_confounds_the_harmonic_comparison(con):
-    """The reason §8.5 stratifies instead of pooling.
+    """The reason §16.5 stratifies instead of pooling.
 
     Sample-specific by nature, but this property is what the design defends
     against, so it is worth failing loudly if the sample stops exhibiting it.

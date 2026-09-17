@@ -5,7 +5,7 @@ Why this module exists
 The obvious design is "call Spotify's ``/v1/audio-features`` for every track
 URI". That door closed: in November 2024 Spotify restricted audio-features and
 audio-analysis to applications that already had access, so a project started
-after that cannot get tempo or key from the API at all (SPEC §8.3).
+after that cannot get tempo or key from the API at all (SPEC §16.3).
 
 Rather than pretend otherwise, features come from a **provider chain**. Each
 provider is asked for a track in turn and the first hit wins:

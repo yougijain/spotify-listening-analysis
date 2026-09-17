@@ -2,7 +2,7 @@
 
 This is the DJ half of the project's domain model, and it is deliberately pure —
 no DuckDB, no I/O, no global state — so every rule here is unit-testable and can
-be reasoned about independently of the data pipeline (see SPEC §8.1).
+be reasoned about independently of the data pipeline (see SPEC §16.1).
 
 Why the Camelot wheel at all
 ----------------------------
@@ -21,7 +21,7 @@ share all but one note, so the moves DJs actually use are all short hops:
 
 Keys arrive as Spotify's ``(pitch_class, mode)`` pair (pitch class 0 = C, 11 = B;
 mode 1 = major, 0 = minor), which is also what Rekordbox / Mixed In Key exports
-reduce to, so one converter serves both feature providers (SPEC §8.3).
+reduce to, so one converter serves both feature providers (SPEC §16.3).
 
 Tempo
 -----
@@ -67,7 +67,7 @@ MOVE_SCORES: dict[str, float] = {
 }
 
 # Moves a DJ would happily play in public. Used by the "is this transition
-# harmonically compatible" label that the hypothesis test in SPEC §8.5 splits on.
+# harmonically compatible" label that the hypothesis test in SPEC §16.5 splits on.
 COMPATIBLE_MOVES = frozenset({"same_key", "adjacent", "relative"})
 
 # CDJ pitch fader range before the artefacts get audible, as a fraction.
@@ -229,7 +229,7 @@ def harmonic_score(a: CamelotKey | None, b: CamelotKey | None) -> float:
 
     A missing key on either side returns the neutral 0.5 rather than a penalty:
     an untagged track should not be pushed out of a set just for being untagged
-    (real crates are always partially tagged — SPEC §8.3).
+    (real crates are always partially tagged — SPEC §16.3).
     """
     if a is None or b is None:
         return 0.5
