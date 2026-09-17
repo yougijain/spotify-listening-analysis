@@ -276,8 +276,12 @@ ship as 101 sampled points rather than formulas transcribed into JS — a sample
 can't drift from its source, a transcription can. `tests/test_web_export.py`
 holds that contract.
 
-Total payload: **132 KB** for 7,718 plays. Vercel is the primary host; a GitHub
-Pages workflow sits alongside it so the site isn't tied to one vendor.
+Total payload: **132 KB** for 7,718 plays. Vercel is the primary host and
+deploys on every push.
+
+Nothing is tied to it: `web/` is four static files with no build step, so any
+static host serves it unchanged — `make serve` does exactly that locally.
+Portability here is a property of the artefact, not of a second pipeline.
 
 ---
 
