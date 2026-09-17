@@ -40,7 +40,7 @@ def track(key, name="T", artist=None, bpm=128.0, camelot="8A", energy=0.7,
 def a_crate(n=40, seed=3):
     """A varied crate: every key, a spread of tempos, distinct artists."""
     rng = random.Random(seed)
-    codes = [f"{i}{l}" for i in range(1, 13) for l in ("A", "B")]
+    codes = [f"{i}{letter}" for i in range(1, 13) for letter in ("A", "B")]
     return [
         track(f"k{i}", name=f"Track {i}", artist=f"Artist {i}",
               bpm=rng.choice([124.0, 126.0, 128.0, 130.0]),

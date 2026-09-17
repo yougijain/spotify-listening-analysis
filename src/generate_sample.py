@@ -99,7 +99,7 @@ PODCASTS = [
 # mixable with itself and gives the crate real harmonic structure rather than
 # uniform noise.
 
-CAMELOT_CODES = [f"{n}{l}" for n in range(1, 13) for l in ("A", "B")]
+CAMELOT_CODES = [f"{n}{letter}" for n in range(1, 13) for letter in ("A", "B")]
 
 # Tempo families a DJ would recognise, with the energy band that tends to go
 # with them. (label, bpm_centre, bpm_spread, energy_low, energy_high)
@@ -117,7 +117,9 @@ def _camelot_neighbours(code: str) -> list:
     """Codes a DJ would mix into `code`: itself, +/-1 on the wheel, relative."""
     number, letter = int(code[:-1]), code[-1]
     other = "B" if letter == "A" else "A"
-    wrap = lambda n: ((n - 1) % 12) + 1
+    def wrap(n: int) -> int:
+        return ((n - 1) % 12) + 1
+
     return [
         f"{number}{letter}",
         f"{wrap(number + 1)}{letter}",
@@ -388,7 +390,7 @@ def write_crate_features(artists, out_dir: Path) -> Path:
                 "Key": track["camelot"],
                 "BPM": f"{track['bpm']:.1f}",
                 # Mixed In Key reports energy as an integer 1-10, not a fraction.
-                "Energy": str(int(round(track["energy"] * 9)) + 1),
+                "Energy": str(round(track["energy"] * 9) + 1),
                 "Duration": f"{track['dur_ms'] // 60000}:{(track['dur_ms'] // 1000) % 60:02d}",
                 "Genre": artist["family"],
             })

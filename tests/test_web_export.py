@@ -9,6 +9,7 @@ mode worth a test file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -32,6 +33,7 @@ from src.setbuilder import (
     load_proven_edges,
     score_transition,
 )
+from tests.conftest import SAMPLE
 
 
 @pytest.fixture(scope="module")
@@ -183,7 +185,7 @@ def test_summary_carries_both_odds_ratios(summary):
 def test_summary_covers_every_exported_arc(summary):
     arcs = summary["arcs"]
     assert set(arcs) == set(ARCS_EXPORTED)
-    for arc, row in arcs.items():
+    for row in arcs.values():
         assert 0 <= row["supply"] <= 1
         assert row["beam"] >= row["greedy"] - 1e-9
         assert row["beam"] > row["random"]
@@ -226,3 +228,29 @@ def test_every_edge_carries_its_proven_term(crate, proven):
         for edge in row:
             assert len(edge) == 3
             assert 0.0 <= edge[2] <= W_PROVEN + 1e-9
+
+
+def test_export_is_byte_stable_across_independent_builds(tmp_path):
+    """These files are committed and CI diffs them, so an unstable row order
+    shows up as a phantom diff and a flaky check.
+
+    Deliberately rebuilds the warehouse from scratch each time rather than
+    reusing one connection. The first version of this test shared a connection
+    and passed while the export was in fact unstable: an unordered GROUP BY
+    returns rows consistently within a build and differently between builds.
+    """
+    from src.pipeline import build, connect
+
+    digests = []
+    for run in range(3):
+        con = connect()
+        build(con, SAMPLE)
+        paths = export_all(con, tmp_path / str(run), top_k=8)
+        digests.append({p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                        for p in paths})
+        con.close()
+
+    for name in digests[0]:
+        assert digests[0][name] == digests[1][name] == digests[2][name], (
+            f"{name} is not reproducible across rebuilds"
+        )

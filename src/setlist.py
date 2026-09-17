@@ -12,6 +12,7 @@ each transition.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 
 from .harmonic import ARCS
@@ -46,10 +47,10 @@ def main() -> int:
                     help="also print feasibility and the baseline comparison")
     args = ap.parse_args()
 
-    try:
+    # Console output carries a few non-ASCII glyphs; make stdout UTF-8 so it
+    # prints on a Windows cp1252 terminal too.
+    with contextlib.suppress(Exception):
         sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
 
     con = connect()
     build(con, args.data, features_file=args.features)

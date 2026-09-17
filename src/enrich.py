@@ -37,9 +37,10 @@ import csv
 import hashlib
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Protocol, Sequence
+from typing import Protocol
 
 import duckdb
 
@@ -76,7 +77,7 @@ _PUNCT = re.compile(r"[^\w\s]", re.UNICODE)
 _SPACE = re.compile(r"\s+")
 
 
-def normalize(text: Optional[str]) -> str:
+def normalize(text: str | None) -> str:
     """Fold a title or artist name down to something joinable.
 
     Lowercases, strips accents, drops punctuation, collapses whitespace, and
@@ -96,7 +97,7 @@ def normalize(text: Optional[str]) -> str:
     return _SPACE.sub(" ", s).strip()
 
 
-def match_key(artist: Optional[str], title: Optional[str]) -> str:
+def match_key(artist: str | None, title: str | None) -> str:
     """The join key between a feature file and the listening history."""
     return f"{normalize(artist)}␟{normalize(title)}"
 
@@ -105,9 +106,9 @@ def match_key(artist: Optional[str], title: Optional[str]) -> str:
 class TrackFeatures:
     """Musical features for one track, plus where they came from."""
 
-    bpm: Optional[float] = None
-    key: Optional[CamelotKey] = None
-    energy: Optional[float] = None
+    bpm: float | None = None
+    key: CamelotKey | None = None
+    energy: float | None = None
     source: str = "unknown"
 
     @property
@@ -120,11 +121,11 @@ class FeatureProvider(Protocol):
 
     name: str
 
-    def lookup(self, artist: str, title: str) -> Optional[TrackFeatures]:
+    def lookup(self, artist: str, title: str) -> TrackFeatures | None:
         """Return features, or ``None`` to defer to the next provider."""
 
 
-def _to_float(value) -> Optional[float]:
+def _to_float(value) -> float | None:
     try:
         f = float(str(value).strip())
     except (TypeError, ValueError):
@@ -132,7 +133,7 @@ def _to_float(value) -> Optional[float]:
     return f if f == f else None          # reject NaN
 
 
-def _normalize_energy(value) -> Optional[float]:
+def _normalize_energy(value) -> float | None:
     """Accept energy as 0..1 (Spotify-style) or 1..10 (Mixed In Key-style).
 
     The two scales overlap only at 1.0, which is read as the top of the 0..1
@@ -226,7 +227,7 @@ class CsvFeatureProvider:
     def __len__(self) -> int:
         return len(self._by_key)
 
-    def lookup(self, artist: str, title: str) -> Optional[TrackFeatures]:
+    def lookup(self, artist: str, title: str) -> TrackFeatures | None:
         found = self._by_key.get(match_key(artist, title))
         # An all-NULL row is no better than a miss; let the next provider try.
         return None if (found is None or found.is_empty) else found
@@ -266,7 +267,7 @@ class SyntheticFeatureProvider:
         return hashlib.blake2b(match_key(artist, title).encode("utf-8"),
                                digest_size=8).digest()
 
-    def lookup(self, artist: str, title: str) -> Optional[TrackFeatures]:
+    def lookup(self, artist: str, title: str) -> TrackFeatures | None:
         d = self._digest(artist, title)
         family = _SYNTH_FAMILIES[d[0] % len(_SYNTH_FAMILIES)]
         centre, spread, e_lo, e_hi = family
@@ -303,7 +304,7 @@ class CoverageReport:
 
 def build_provider_chain(
     data_dir: str | Path,
-    features_file: Optional[str] = None,
+    features_file: str | None = None,
     allow_synthetic: bool = True,
 ) -> list[FeatureProvider]:
     """Assemble the providers for a run: the feature CSV first, fallback last.
@@ -402,7 +403,7 @@ def load_camelot_moves(con: duckdb.DuckDBPyConnection) -> int:
     """
     from .harmonic import MOVE_SCORES, classify_move, is_compatible  # local: avoids cycle
 
-    keys = [CamelotKey(n, l) for n in range(1, 13) for l in ("A", "B")]
+    keys = [CamelotKey(n, letter) for n in range(1, 13) for letter in ("A", "B")]
     rows = [
         (a.code, b.code, classify_move(a, b),
          MOVE_SCORES[classify_move(a, b)], is_compatible(a, b))

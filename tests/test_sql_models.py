@@ -13,7 +13,6 @@ import pytest
 from src.harmonic import CamelotKey, bpm_delta, classify_move, is_compatible
 from src.stats import wilson_interval
 
-
 # --- the Camelot move table is generated from the tested Python -------------
 
 def test_camelot_move_table_is_complete(con):
@@ -25,7 +24,7 @@ def test_camelot_move_table_agrees_with_the_python_implementation(con):
         "SELECT from_code, to_code, move, move_score, is_harmonic FROM camelot_moves"
     ).fetchall()
     assert len(rows) == 576
-    for from_code, to_code, move, score, harmonic in rows:
+    for from_code, to_code, move, _score, harmonic in rows:
         a = CamelotKey(int(from_code[:-1]), from_code[-1])
         b = CamelotKey(int(to_code[:-1]), to_code[-1])
         assert move == classify_move(a, b)

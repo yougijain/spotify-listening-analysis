@@ -20,7 +20,6 @@ from src.stats import (
     wilson_interval,
 )
 
-
 # --- Wilson ----------------------------------------------------------------
 
 def test_wilson_brackets_the_point_estimate():

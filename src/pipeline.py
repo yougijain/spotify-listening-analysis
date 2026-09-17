@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 import pandas as pd
@@ -43,7 +42,7 @@ SQL_AFTER_ENRICH = [
 SQL_FILES = SQL_BEFORE_ENRICH + SQL_AFTER_ENRICH
 
 
-def connect(db_path: Optional[str] = None) -> duckdb.DuckDBPyConnection:
+def connect(db_path: str | None = None) -> duckdb.DuckDBPyConnection:
     return duckdb.connect(db_path) if db_path else duckdb.connect()
 
 
@@ -88,7 +87,7 @@ def build(
     tz_offset_min: int = 330,
     session_gap_min: int = 30,
     burn_half_life_days: float = 60.0,
-    features_file: Optional[str] = None,
+    features_file: str | None = None,
     allow_synthetic_features: bool = True,
 ) -> BuildResult:
     """Load data, enrich it, and materialize every model.

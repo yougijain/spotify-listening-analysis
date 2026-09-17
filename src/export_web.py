@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 
@@ -49,9 +48,9 @@ from .setbuilder import (
     W_QUALITY,
     W_TEMPO,
     Constraints,
+    arc_feasibility,
     base_transition_score,
     build_set,
-    arc_feasibility,
     evaluate,
     load_crate,
     load_proven_edges,
@@ -206,18 +205,24 @@ def charts_payload(con: duckdb.DuckDBPyConnection) -> dict:
     """).fetchall()
     moves = con.execute("""
         SELECT move, n, skip_rate, hold_lcb FROM transition_move_performance
-        ORDER BY skip_rate
+        ORDER BY skip_rate, move
     """).fetchall()
+    # Explicit, total ordering on every query below. A bare GROUP BY leaves
+    # DuckDB free to return rows in whatever order the aggregation produced,
+    # which differs between runs — and these files are committed, so an
+    # unstable order shows up as phantom diffs and a flaky CI sync check.
     bands = con.execute("""
-        SELECT band, n_tracks, avg_energy, avg_readiness FROM crate_tempo_bands
+        SELECT band, n_tracks, avg_energy, avg_readiness
+        FROM crate_tempo_bands ORDER BY band
     """).fetchall()
     status = con.execute("""
-        SELECT crate_status, count(*) FROM crate GROUP BY 1 ORDER BY 2 DESC
+        SELECT crate_status, count(*) AS n FROM crate
+        GROUP BY 1 ORDER BY n DESC, crate_status
     """).fetchall()
     return {
-        "wheel": [{"number": int(n), "letter": l, "tracks": int(c),
+        "wheel": [{"number": int(n), "letter": letter, "tracks": int(c),
                    "energy": _round(e, 3), "readiness": _round(r, 3)}
-                  for n, l, c, e, r in wheel],
+                  for n, letter, c, e, r in wheel],
         "moves": [{"move": m, "n": int(n), "skip_rate": _round(s, 4),
                    "hold_lcb": _round(h, 4)} for m, n, s, h in moves],
         "bands": [{"band": b, "tracks": int(n), "energy": _round(e, 3),
@@ -246,7 +251,7 @@ def config_payload() -> dict:
 
 def export_all(
     con: duckdb.DuckDBPyConnection,
-    out_dir: Optional[Path] = None,
+    out_dir: Path | None = None,
     top_k: int = TOP_K,
 ) -> list:
     """Write every payload. Returns the paths written."""

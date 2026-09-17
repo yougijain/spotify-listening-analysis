@@ -88,7 +88,7 @@ def test_key_name_round_trips_through_camelot(pitch, mode):
     expected_mode = "major" if mode == 1 else "minor"
     assert name.endswith(expected_mode)
     # Re-deriving the pitch from the name must land back where we started.
-    from src.harmonic import _PITCH_NAMES  # noqa: PLC0415 - internal oracle
+    from src.harmonic import _PITCH_NAMES
 
     assert _PITCH_NAMES.index(name.rsplit(" ", 1)[0]) == pitch
 
@@ -144,7 +144,7 @@ def test_adjacent_and_relative_are_symmetric_but_energy_boost_is_not():
 
 
 def test_every_key_pair_classifies_without_raising():
-    keys = [CamelotKey(n, l) for n in range(1, 13) for l in ("A", "B")]
+    keys = [CamelotKey(n, letter) for n in range(1, 13) for letter in ("A", "B")]
     for a in keys:
         for b in keys:
             assert classify_move(a, b) in {

@@ -21,8 +21,8 @@ Three things live here, in increasing order of how much they matter:
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from scipy import stats
 

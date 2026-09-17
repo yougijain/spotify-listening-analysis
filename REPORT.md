@@ -82,7 +82,7 @@ Beam search over the crate, scoring every transition on harmonic move, tempo rea
 |---|---:|---:|---:|---:|---:|---:|
 | warmup | 70% | 82% | 0.30 | **0.780** | 0.754 | 0.548 |
 | peak | 100% | 100% | 0.07 | **0.869** | 0.849 | 0.567 |
-| journey | 87% | 73% | 0.24 | **0.798** | 0.774 | 0.557 |
+| journey | 96% | 73% | 0.23 | **0.796** | 0.776 | 0.559 |
 | closing | 96% | 100% | 0.09 | **0.858** | 0.858 | 0.562 |
 
    ![set energy arc](figures/set_energy_arc.png)

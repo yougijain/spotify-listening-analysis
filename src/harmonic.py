@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Literal
 
 # Circle of fifths in pitch-class order starting at C. Position in this list is
 # what the Camelot number encodes: C major sits at 8B, each fifth adds one.
@@ -151,7 +151,7 @@ _NOTE_ALIASES = {
 }
 
 
-def parse_key(text: Optional[str]) -> Optional[CamelotKey]:
+def parse_key(text: str | None) -> CamelotKey | None:
     """Best-effort parse of whatever a feature file calls a key.
 
     Accepts Camelot codes (``"9A"``), note names with an explicit mode
@@ -224,7 +224,7 @@ def classify_move(a: CamelotKey, b: CamelotKey) -> MoveName:
     return "clash"
 
 
-def harmonic_score(a: Optional[CamelotKey], b: Optional[CamelotKey]) -> float:
+def harmonic_score(a: CamelotKey | None, b: CamelotKey | None) -> float:
     """0..1 score for mixing ``a`` into ``b``.
 
     A missing key on either side returns the neutral 0.5 rather than a penalty:
@@ -236,7 +236,7 @@ def harmonic_score(a: Optional[CamelotKey], b: Optional[CamelotKey]) -> float:
     return MOVE_SCORES[classify_move(a, b)]
 
 
-def is_compatible(a: Optional[CamelotKey], b: Optional[CamelotKey]) -> bool:
+def is_compatible(a: CamelotKey | None, b: CamelotKey | None) -> bool:
     """Would a DJ call this transition harmonically clean?"""
     if a is None or b is None:
         return False
@@ -255,7 +255,7 @@ def bpm_delta(from_bpm: float, to_bpm: float) -> float:
     return min(abs(c - from_bpm) / from_bpm for c in candidates)
 
 
-def bpm_score(from_bpm: Optional[float], to_bpm: Optional[float]) -> float:
+def bpm_score(from_bpm: float | None, to_bpm: float | None) -> float:
     """0..1 tempo compatibility, flat inside the free zone then linear to 0.
 
     Anything inside +/-2% is free (1.0), the score falls linearly to 0 at the
@@ -304,7 +304,7 @@ def arc_target(arc: str, position: int, total: int) -> float:
     return float(min(1.0, max(0.0, ARCS[arc](t))))
 
 
-def energy_score(energy: Optional[float], target: float) -> float:
+def energy_score(energy: float | None, target: float) -> float:
     """0..1 for how well a track's energy fits the arc target at that slot."""
     if energy is None:
         return 0.5

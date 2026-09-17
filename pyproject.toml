@@ -1,0 +1,56 @@
+[project]
+name = "crate-intelligence"
+version = "1.0.0"
+description = "Turning a Spotify streaming-history export into DJ decisions: crate health, a transition graph, and a beam-search set builder."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Yougi Jain" }]
+keywords = ["duckdb", "analytics", "dj", "harmonic-mixing", "camelot", "spotify"]
+
+dependencies = [
+    "duckdb>=1.4,<2",
+    "pandas>=2.0,<3",
+    "numpy>=1.24,<3",
+    "matplotlib>=3.8,<4",
+    "scipy>=1.11,<2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.6,<1",
+    "nbconvert>=7,<8",
+    "ipykernel>=6,<7",
+    "nbformat>=5,<6",
+]
+
+[project.scripts]
+crate-analysis = "src.run_analysis:main"
+crate-setlist = "src.setlist:main"
+crate-export = "src.export_web:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = ["error::DeprecationWarning:src.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = [
+    "E501",    # long lines are caught by the formatter's judgement, not a hard stop
+    "SIM108",  # ternaries are not always clearer than an if/else
+    "B905",    # zip(strict=) is 3.10+, and the zips here are known-equal length
+    "RUF001",  # en/em dashes in titles are the whole point of the title matcher
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into internals deliberately, and fixtures shadow module names.
+"tests/*" = ["F811", "SIM117"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]

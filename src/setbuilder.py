@@ -44,8 +44,9 @@ and reports the score distributions.
 from __future__ import annotations
 
 import random
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import Iterable, Optional, Sequence
+from itertools import pairwise
 
 import duckdb
 
@@ -90,9 +91,9 @@ class Track:
     track_key: str
     track_name: str
     artist_name: str
-    bpm: Optional[float] = None
-    key: Optional[CamelotKey] = None
-    energy: Optional[float] = None
+    bpm: float | None = None
+    key: CamelotKey | None = None
+    energy: float | None = None
     set_readiness: float = 0.5
     hold_lcb: float = 0.5
     rotation_burn: float = 0.5
@@ -100,7 +101,7 @@ class Track:
     minutes: float = DEFAULT_TRACK_MINUTES
 
     @property
-    def camelot(self) -> Optional[str]:
+    def camelot(self) -> str | None:
         return self.key.code if self.key else None
 
     def label(self) -> str:
@@ -125,8 +126,8 @@ class Transition:
     continuity: float
     quality: float
     proven: float
-    move: Optional[str]
-    bpm_delta: Optional[float]
+    move: str | None
+    bpm_delta: float | None
 
 
 @dataclass
@@ -176,7 +177,7 @@ class SetPlan:
         energies = [t.energy for t in self.tracks if t.energy is not None]
         if len(energies) < 2:
             return 0.0
-        return max(abs(b - a) for a, b in zip(energies, energies[1:]))
+        return max(abs(b - a) for a, b in pairwise(energies))
 
     def describe(self) -> str:
         lines = [f"{len(self.tracks)} tracks · {self.minutes:.0f} min · "
@@ -247,7 +248,7 @@ def score_transition(
                       energy_fit, continuity, quality, proven, move, delta)
 
 
-def energy_continuity(from_energy: Optional[float], to_energy: Optional[float]) -> float:
+def energy_continuity(from_energy: float | None, to_energy: float | None) -> float:
     """1..0 for how survivable the energy step between two tracks is.
 
     Free inside ``ENERGY_STEP_FREE``, then linear to 0 at ``ENERGY_CLIFF``.
@@ -269,7 +270,7 @@ def _energy_fit(track: Track, arc: str, position: int, total: int) -> float:
     return energy_score(track.energy, arc_target(arc, position, total))
 
 
-def _bpm_delta_or_none(a: Optional[float], b: Optional[float]) -> Optional[float]:
+def _bpm_delta_or_none(a: float | None, b: float | None) -> float | None:
     from .harmonic import bpm_delta
 
     if a is None or b is None or a <= 0 or b <= 0:
@@ -314,9 +315,9 @@ def build_set(
     tracks: Sequence[Track],
     target_minutes: float = 60.0,
     arc: str = "peak",
-    seed_key: Optional[str] = None,
-    constraints: Optional[Constraints] = None,
-    proven_edges: Optional[dict] = None,
+    seed_key: str | None = None,
+    constraints: Constraints | None = None,
+    proven_edges: dict | None = None,
     beam_width: int = DEFAULT_BEAM_WIDTH,
     branching: int = DEFAULT_BRANCHING,
     _include_greedy: bool = True,
@@ -370,8 +371,8 @@ def build_set(
             candidates.sort(key=lambda t: t.score, reverse=True)
             for trans in candidates[:branching]:
                 nxt.append(_Beam(
-                    beam.tracks + [by_key[trans.to_key]],
-                    beam.transitions + [trans],
+                    [*beam.tracks, by_key[trans.to_key]],
+                    [*beam.transitions, trans],
                     beam.score + trans.score,
                 ))
         if not nxt:
@@ -414,7 +415,7 @@ def _pick_openers(
     tracks: Sequence[Track],
     arc: str,
     slots: int,
-    seed_key: Optional[str],
+    seed_key: str | None,
     by_key: dict,
     beam_width: int,
     constraints: Constraints,
@@ -468,7 +469,7 @@ class ArcFeasibility:
     worst_supply: float
     worst_target: float
     n_slots: int
-    reference_bpm: Optional[float]
+    reference_bpm: float | None
     stranded: int
 
     @property
@@ -488,7 +489,7 @@ class ArcFeasibility:
                 f"{self.worst_target:.2f}{stranded})")
 
 
-def _median(values: Sequence[float]) -> Optional[float]:
+def _median(values: Sequence[float]) -> float | None:
     ordered = sorted(values)
     if not ordered:
         return None
@@ -504,7 +505,7 @@ def arc_feasibility(
     target_minutes: float = 60.0,
     tolerance: float = ARC_TOLERANCE,
     depth: int = ARC_DEPTH,
-    reference_bpm: Optional[float] = None,
+    reference_bpm: float | None = None,
     max_drift: float = DEFAULT_MAX_DRIFT,
 ) -> ArcFeasibility:
     """Measure, slot by slot, how much *reachable* material the crate has.
@@ -569,9 +570,9 @@ def build_set_random(
     tracks: Sequence[Track],
     target_minutes: float = 60.0,
     arc: str = "peak",
-    constraints: Optional[Constraints] = None,
-    proven_edges: Optional[dict] = None,
-    rng: Optional[random.Random] = None,
+    constraints: Constraints | None = None,
+    proven_edges: dict | None = None,
+    rng: random.Random | None = None,
 ) -> SetPlan:
     """A constraint-respecting random ordering: the floor for the objective.
 
@@ -634,7 +635,7 @@ def evaluate(
     tracks: Sequence[Track],
     target_minutes: float = 60.0,
     arc: str = "peak",
-    proven_edges: Optional[dict] = None,
+    proven_edges: dict | None = None,
     random_trials: int = 200,
     seed: int = 7,
     **kwargs,
@@ -686,6 +687,10 @@ def load_crate(
     if exclusions:
         sql += f" AND crate_status NOT IN ({','.join('?' * len(exclusions))})"
         params.extend(exclusions)
+    # Deterministic order, because this list's positions ARE the node indices in
+    # the exported transition graph. Without it a rebuild can renumber every
+    # node, which turns a no-op re-export into a whole-file diff.
+    sql += " ORDER BY track_key"
 
     out = []
     for row in con.execute(sql, params).fetchall():

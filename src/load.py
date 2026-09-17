@@ -23,12 +23,11 @@ from __future__ import annotations
 import glob
 import os
 from pathlib import Path
-from typing import List
 
 import duckdb
 
 # Standard target schema for raw_streams: (column, duckdb_type).
-RAW_SCHEMA: List[tuple] = [
+RAW_SCHEMA: list[tuple] = [
     ("ts", "VARCHAR"),                 # UTC, ISO 8601
     ("ms_played", "BIGINT"),
     ("track_name", "VARCHAR"),

@@ -12,11 +12,10 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # headless: no display needed
+import duckdb
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
-
-import duckdb
 
 FIG_DIR = Path(__file__).resolve().parents[1] / "figures"
 ACCENT = "#1DB954"   # Spotify green
@@ -75,8 +74,10 @@ def hour_dow_heatmap(con: duckdb.DuckDBPyConnection) -> Path:
             grid[ri, h] = lookup.get((dow, h), 0.0) / 60.0   # hours
     fig, ax = plt.subplots(figsize=(10, 3.6))
     im = ax.imshow(grid, aspect="auto", cmap="Greens", origin="upper")
-    ax.set_yticks(range(7)); ax.set_yticklabels(DOW_LABELS)
-    ax.set_xticks(range(0, 24, 2)); ax.set_xticklabels(range(0, 24, 2))
+    ax.set_yticks(range(7))
+    ax.set_yticklabels(DOW_LABELS)
+    ax.set_xticks(range(0, 24, 2))
+    ax.set_xticklabels(range(0, 24, 2))
     ax.set_xlabel("hour of day (local)")
     ax.set_title("When listening happens (hours, local time)")
     ax.grid(False)
@@ -91,9 +92,12 @@ def skip_breakdown(con: duckdb.DuckDBPyConnection) -> Path:
     labels, vals, colors = ["overall"], [overall], [MUTED]
     for _, r in shuf.iterrows():
         labels.append("shuffle on" if r.shuffle else "shuffle off")
-        vals.append(r.skip_rate); colors.append(ACCENT if r.shuffle else "#7bd49b")
+        vals.append(r.skip_rate)
+        colors.append(ACCENT if r.shuffle else "#7bd49b")
     for _, r in fam.iterrows():
-        labels.append(r.familiarity); vals.append(r.skip_rate); colors.append("#b3b3b3")
+        labels.append(r.familiarity)
+        vals.append(r.skip_rate)
+        colors.append("#b3b3b3")
     fig, ax = plt.subplots(figsize=(8, 4.2))
     bars = ax.bar(labels, [v * 100 for v in vals], color=colors)
     ax.set_ylabel("skip rate (%)")
@@ -145,7 +149,7 @@ def concentration(con: duckdb.DuckDBPyConnection) -> Path:
     ax.set_aspect("equal")
     ax.annotate(f"top 10% of artists = {top10*100:.0f}% of listening",
                 xy=(0.9, 0.32), xytext=(0.18, 0.62), fontsize=9, color=INK,
-                arrowprops=dict(arrowstyle="->", color=MUTED))
+                arrowprops={"arrowstyle": "->", "color": MUTED})
     ax.legend(frameon=False, loc="upper left", fontsize=8)
     return _save(fig, "concentration.png")
 

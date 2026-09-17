@@ -141,9 +141,13 @@ def print_validation(con, m, data_dir, coverage=None) -> list:
     return lines
 
 
+def pct(x) -> str:
+    """Format a proportion for the report."""
+    return f"{x * 100:.1f}%"
+
+
 def dj_sections(m, hh, ht, sets, figs) -> list:
     """The crate / transition / set-building half of the report (SPEC §8-9)."""
-    pct = lambda x: f"{x*100:.1f}%"
     L = []
 
     L.append("## The crate\n")
@@ -246,7 +250,6 @@ def dj_sections(m, hh, ht, sets, figs) -> list:
 
 
 def write_report(m, h, qa_lines, fig_paths, hh=None, ht=None, sets=None) -> Path:
-    pct = lambda x: f"{x*100:.1f}%"
     sig = "statistically significant" if h["p_one_sided"] < 0.05 else "not significant"
     direction = "expanding" if m["discovery_avg"] and m["discovery_avg"] > 0 else "flat"
     figs = {p.stem: f"figures/{p.name}" for p in fig_paths}
