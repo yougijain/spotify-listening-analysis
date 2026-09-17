@@ -564,8 +564,17 @@ finding the tool reports, not a defect it hides.
 **Decision: a static site, no backend.** The analysis is a batch job over a
 fixed export, so its output is computed once at build time and shipped as files.
 That buys a free host, no cold starts, no secrets in an environment, and nothing
-that can fall over unattended. Vercel is the primary host (`vercel.json`); a
-GitHub Pages workflow sits alongside so the site is not tied to one vendor.
+that can fall over unattended. Vercel is the primary host (`vercel.json`).
+
+**Portability is a property of the artefact, not of a second pipeline.** `web/`
+is four static files with no build step, so any static host serves it
+unchanged. A GitHub Pages workflow was built as an explicit second deploy path
+and then removed: creating a Pages site is an admin-scoped API call the Actions
+`GITHUB_TOKEN` cannot make (`configure-pages` with `enablement: true` fails
+with "Resource not accessible by integration"), so it needed a manual toggle
+and a manual run to ever succeed. A deploy path that has never executed is not
+a fallback, and a workflow that reds the Actions tab on every push is worse
+than none.
 
 **The one thing that must be interactive is the set builder** — a page of
 pre-rendered setlists is a screenshot, not a tool. So the browser runs the beam
