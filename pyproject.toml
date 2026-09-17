@@ -33,6 +33,10 @@ crate-export = "src.export_web:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --strict-markers"
+# Put the repo root on sys.path so `pytest` works the same as `python -m pytest`.
+# Only the latter adds the working directory implicitly, which is why this was
+# green locally and red in CI.
+pythonpath = ["."]
 filterwarnings = ["error::DeprecationWarning:src.*"]
 
 [tool.ruff]
