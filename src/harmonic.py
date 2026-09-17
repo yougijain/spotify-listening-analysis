@@ -137,6 +137,56 @@ def parse_camelot(code: str) -> CamelotKey:
     return CamelotKey(int(number_part), letter)
 
 
+# Accepted spellings for a musical key, for feature files that use note names
+# instead of Camelot codes. Rekordbox writes "Am", Traktor writes "A min",
+# Serato writes "A minor", and plenty of tag editors just write "A".
+_MODE_SUFFIXES = [
+    ("MINOR", 0), ("MIN", 0), ("M", 0),   # longest first: "MIN" must beat "M"
+    ("MAJOR", 1), ("MAJ", 1),
+]
+_NOTE_ALIASES = {
+    "DB": 1, "EB": 3, "GB": 6, "AB": 8, "BB": 10,   # flats -> sharps
+    "CB": 11, "FB": 4, "E#": 5, "B#": 0,            # rare enharmonics
+}
+
+
+def parse_key(text: Optional[str]) -> Optional[CamelotKey]:
+    """Best-effort parse of whatever a feature file calls a key.
+
+    Accepts Camelot codes (``"9A"``), note names with an explicit mode
+    (``"Am"``, ``"A min"``, ``"A minor"``), and bare note names (``"A"``, read
+    as major, matching the convention of tag editors that omit the mode).
+    Returns ``None`` for blanks and anything unrecognised rather than raising —
+    a feature file with one bad row should lose that row, not the whole import.
+    """
+    if text is None:
+        return None
+    raw = str(text).strip()
+    if not raw:
+        return None
+
+    try:
+        return parse_camelot(raw)
+    except ValueError:
+        pass
+
+    # Note name + optional mode. Normalise unicode-ish sharps/flats first.
+    s = raw.upper().replace("\u266f", "#").replace("\u266d", "B").replace(" ", "")
+    mode = 1
+    for suffix, m in _MODE_SUFFIXES:
+        if s.endswith(suffix) and len(s) > len(suffix):
+            s, mode = s[: -len(suffix)], m
+            break
+
+    if s in _NOTE_ALIASES:
+        pitch = _NOTE_ALIASES[s]
+    elif s in _PITCH_NAMES:
+        pitch = _PITCH_NAMES.index(s)
+    else:
+        return None
+    return camelot_from_pitch(pitch, mode)
+
+
 def key_name(key: CamelotKey) -> str:
     """Human-readable musical name, e.g. ``9A`` -> ``"E minor"``.
 
