@@ -1,13 +1,17 @@
 name: CI
 
 on:
+  # Only main on push. Every other branch is covered by pull_request, and
+  # listening for both ran the whole matrix twice for each push to an open PR.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # head_ref on a PR, ref on a push to main - so a new push supersedes the run
+  # already in flight for the same branch instead of queueing behind it.
+  group: ci-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
