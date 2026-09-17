@@ -443,3 +443,29 @@ def test_beam_never_loses_to_greedy_on_the_real_crate(con):
         ev = evaluate(crate, 60, arc, proven_edges=load_proven_edges(con),
                       random_trials=3)
         assert ev.beam >= ev.greedy - 1e-12, f"{arc}: beam {ev.beam} < greedy {ev.greedy}"
+
+
+def test_a_single_thin_slot_is_not_called_an_unsupported_arc():
+    """A 96%-supplied arc with one empty slot at an extreme is a gap at one end,
+    not a crate that cannot play the arc. The two want different responses."""
+    from src.setbuilder import arc_feasibility
+
+    # Energy spans 0.56-0.95. A closing arc runs 0.85 down to 0.40, so every
+    # slot is covered except the very last one, which wants 0.40 and has
+    # nothing within tolerance.
+    crate = [track(f"k{i}", artist=f"A{i}", energy=0.56 + (i % 40) / 100.0, bpm=128)
+             for i in range(120)]
+    f = arc_feasibility(crate, "closing", 60)
+    assert f.mean_supply >= 0.85
+    assert f.worst_supply < 0.5
+    assert f.verdict.startswith("short only at the")
+    assert f.verdict.endswith(("start of the arc", "middle of the arc", "end of the arc"))
+
+
+def test_a_genuinely_unsupported_arc_still_says_so():
+    from src.setbuilder import arc_feasibility
+
+    peak_only = [track(f"k{i}", artist=f"A{i}", energy=0.92, bpm=138) for i in range(60)]
+    f = arc_feasibility(peak_only, "warmup", 60)
+    assert f.mean_supply < 0.85
+    assert f.verdict == "not supported by this crate"

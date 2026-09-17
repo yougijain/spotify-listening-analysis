@@ -474,11 +474,30 @@ class ArcFeasibility:
 
     @property
     def verdict(self) -> str:
+        """A label for the shape of the shortfall, not just its depth.
+
+        Judging on the worst slot alone is too blunt: an arc can be 96% supplied
+        overall and still have one empty slot at an extreme, which is a gap at
+        one end of the curve rather than a crate that cannot play the arc at
+        all. Those two want different responses, so they get different words.
+        """
         if self.worst_supply >= 1.0:
             return "well supplied"
         if self.worst_supply >= 0.5:
             return "thin in places"
+        if self.mean_supply >= 0.85:
+            return f"short only at the {self._thin_end()} of the arc"
         return "not supported by this crate"
+
+    def _thin_end(self) -> str:
+        if self.n_slots <= 1:
+            return "start"
+        position = self.worst_slot / (self.n_slots - 1)
+        if position <= 0.2:
+            return "start"
+        if position >= 0.8:
+            return "end"
+        return "middle"
 
     def summary(self) -> str:
         stranded = (f", {self.stranded} on-energy tracks stranded out of tempo range"
