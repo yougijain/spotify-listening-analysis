@@ -73,6 +73,11 @@ def _round(value, places: int = 4):
 def build_graph(tracks, proven_edges: dict, top_k: int = TOP_K) -> dict:
     """Top-``top_k`` outgoing candidates per track, scored and pre-sorted.
 
+    Each edge is ``[to_index, base_score, proven_contribution]``. The proven
+    term is carried separately rather than only folded into the base, so the
+    dashboard's "favour mixes I've already played" toggle can actually subtract
+    it. A control that silently does nothing is worse than no control.
+
     Hard constraints that depend only on the pair — the tempo cap and the
     same-track rule — are applied here, so the browser never sees an edge it
     would have to reject. Artist spacing depends on the whole path, so it stays
@@ -90,9 +95,11 @@ def build_graph(tracks, proven_edges: dict, top_k: int = TOP_K) -> dict:
             if not constraints.allows([src], dst):
                 continue
             proven = proven_edges.get((src.track_key, dst.track_key), 0.0)
-            scored.append((base_transition_score(src, dst, proven), index[dst.track_key]))
-        scored.sort(reverse=True)
-        edges.append([[i, round(s, 4)] for s, i in scored[:top_k]])
+            scored.append((base_transition_score(src, dst, proven),
+                           index[dst.track_key], W_PROVEN * proven))
+        scored.sort(key=lambda row: row[0], reverse=True)
+        edges.append([[i, round(s, 4), round(p, 4)]
+                      for s, i, p in scored[:top_k]])
     return {"top_k": top_k, "edges": edges}
 
 

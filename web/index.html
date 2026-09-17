@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crate Intelligence — reading a DJ set out of three years of listening history</title>
+<meta name="description" content="Turning a Spotify streaming-history export into DJ decisions: which tracks hold a floor, which are burned out from overplay, and what order they play in. Harmonic mixing, a transition graph, and a beam-search set builder.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎛️</text></svg>">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">Spotify Extended Streaming History → record bag</p>
+    <h1>Crate&nbsp;Intelligence</h1>
+    <p class="lede">
+      I DJ. Wrapped tells me what I listened to, which is the least useful thing
+      about it. What I need to know before a gig is narrower and harder:
+      <strong>which tracks actually hold a room</strong>,
+      <strong>which ones I've flogged to death</strong>, and
+      <strong>what order any of it plays in</strong>.
+      So I pointed a product-analytics pipeline at three years of my own
+      listening history and made it answer those three questions.
+    </p>
+    <div class="stat-row" id="hero-stats"></div>
+    <p class="provenance">
+      Everything below is computed from a <strong>fully synthetic sample</strong>
+      committed to the repo, so it runs end-to-end with zero personal data.
+      Swapping in a real export is one flag.
+      <a href="https://github.com/yougijain/spotify-listening-analysis">Source on GitHub →</a>
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- ============ SET BUILDER ============ -->
+  <section id="builder">
+    <div class="section-head">
+      <h2>Build me a set</h2>
+      <p>
+        Beam search over the crate. Every transition is scored on the harmonic
+        move, whether the tempo is reachable through a pitch fader, how well the
+        incoming track fits the arc's energy target, how survivable the energy
+        step is, and whether the track is worth playing at all — with hard
+        constraints for repeats, artist spacing and tempo jumps.
+        <em>This runs in your browser</em>, over a graph precomputed by the same
+        Python that scores it in the report.
+      </p>
+    </div>
+
+    <div class="controls">
+      <div class="control">
+        <label for="arc">Energy arc</label>
+        <div class="segmented" id="arc" role="radiogroup" aria-label="Energy arc"></div>
+      </div>
+      <div class="control">
+        <label for="minutes">Set length <output id="minutes-out">60 min</output></label>
+        <input type="range" id="minutes" min="20" max="150" step="5" value="60">
+      </div>
+      <div class="control">
+        <label for="gap">Artist spacing <output id="gap-out">3 tracks</output></label>
+        <input type="range" id="gap" min="0" max="8" step="1" value="3">
+      </div>
+      <div class="control checkbox">
+        <label><input type="checkbox" id="include-burned"> Allow burned tracks back in</label>
+        <label><input type="checkbox" id="prefer-proven" checked> Favour mixes I've already played</label>
+      </div>
+    </div>
+
+    <div id="feasibility" class="callout" hidden></div>
+
+    <div class="setlist-head">
+      <div id="set-metrics" class="metrics"></div>
+      <button id="rebuild" class="btn">Rebuild</button>
+    </div>
+    <ol id="setlist" class="setlist" aria-live="polite"></ol>
+  </section>
+
+  <!-- ============ DOES HARMONY MATTER ============ -->
+  <section id="harmony">
+    <div class="section-head">
+      <h2>Does harmonic mixing actually hold the listener?</h2>
+      <p>
+        The transition graph is the one thing three years of history can supply
+        that a Mixed In Key export cannot: which tracks actually got played
+        back-to-back, and whether the incoming one survived. A skip on the
+        incoming track is the closest thing streaming data has to
+        <em>the transition didn't work</em>.
+      </p>
+    </div>
+    <div class="split">
+      <figure class="card">
+        <figcaption>Skip rate of the incoming track, by harmonic move</figcaption>
+        <div id="chart-moves"></div>
+      </figure>
+      <div class="card" id="harmonic-test"></div>
+    </div>
+  </section>
+
+  <!-- ============ THE CRATE ============ -->
+  <section id="crate">
+    <div class="section-head">
+      <h2>The crate</h2>
+      <p>
+        Three questions per track: does it hold, have I burned it out, and is
+        there enough evidence to have an opinion. Holding is a Wilson lower
+        bound on the non-skip rate — a track played twice and never skipped
+        shows a perfect 100%, and ranking on that puts the least-evidenced
+        tracks on top.
+      </p>
+    </div>
+    <div class="split">
+      <figure class="card">
+        <figcaption>Crate coverage around the Camelot wheel</figcaption>
+        <div id="chart-wheel"></div>
+        <p class="caption">Inner ring is minor (A), outer is major (B). Gaps are
+          keys I can't mix out of.</p>
+      </figure>
+      <figure class="card">
+        <figcaption>Does it hold, and have I flogged it?</figcaption>
+        <div id="chart-health"></div>
+        <p class="caption">The burned tracks sit top-right, not bottom-right —
+          they're flogged <em>because</em> they hold. "Rest these" is a
+          freshness call, not a quality one.</p>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============ METHOD ============ -->
+  <section id="method">
+    <div class="section-head">
+      <h2>How it's built</h2>
+    </div>
+    <div class="method-grid" id="method-grid"></div>
+    <div class="card caveats">
+      <h3>What this doesn't prove</h3>
+      <ul id="caveats"></ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      DuckDB · Python · no framework, no backend, no build step.
+      <a href="https://github.com/yougijain/spotify-listening-analysis">Read the source</a>
+    </p>
+  </div>
+</footer>
+
+<script src="assets/app.js" type="module"></script>
+</body>
+</html>

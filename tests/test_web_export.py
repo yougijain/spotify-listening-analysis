@@ -25,6 +25,7 @@ from src.export_web import (
 from src.harmonic import arc_target
 from src.setbuilder import (
     W_ENERGY,
+    W_PROVEN,
     Constraints,
     base_transition_score,
     load_crate,
@@ -121,14 +122,14 @@ def test_graph_respects_the_cap(crate, proven):
 def test_graph_edges_are_sorted_best_first(crate, proven):
     g = build_graph(crate, proven, top_k=12)
     for row in g["edges"]:
-        scores = [s for _, s in row]
+        scores = [s for _, s, _ in row]
         assert scores == sorted(scores, reverse=True)
 
 
 def test_graph_never_points_a_track_at_itself(crate, proven):
     g = build_graph(crate, proven, top_k=12)
     for i, row in enumerate(g["edges"]):
-        assert all(j != i for j, _ in row)
+        assert all(j != i for j, _, _ in row)
 
 
 def test_graph_edge_scores_match_python(crate, proven):
@@ -136,10 +137,12 @@ def test_graph_edge_scores_match_python(crate, proven):
     g = build_graph(crate, proven, top_k=10)
     for i, row in enumerate(g["edges"][:60]):
         src = crate[i]
-        for j, score in row:
+        for j, score, proven_term in row:
             dst = crate[j]
             p = proven.get((src.track_key, dst.track_key), 0.0)
             assert score == pytest.approx(base_transition_score(src, dst, p), abs=1e-4)
+            # The proven term ships separately so the client can subtract it.
+            assert proven_term == pytest.approx(W_PROVEN * p, abs=1e-4)
 
 
 def test_graph_pre_applies_the_pair_level_constraints(crate, proven):
@@ -147,14 +150,14 @@ def test_graph_pre_applies_the_pair_level_constraints(crate, proven):
     g = build_graph(crate, proven, top_k=24)
     c = Constraints()
     for i, row in enumerate(g["edges"][:80]):
-        for j, _ in row:
+        for j, _, _ in row:
             assert c.allows([crate[i]], crate[j])
 
 
 def test_graph_indices_are_in_range(crate, proven):
     g = build_graph(crate, proven, top_k=12)
     for row in g["edges"]:
-        assert all(0 <= j < len(crate) for j, _ in row)
+        assert all(0 <= j < len(crate) for j, _, _ in row)
 
 
 # --- payload shapes --------------------------------------------------------
@@ -213,3 +216,13 @@ def test_exported_payload_stays_small_enough_to_be_a_static_asset(con, tmp_path)
 def test_exported_files_use_lf_endings(con, tmp_path):
     for path in export_all(con, tmp_path, top_k=4):
         assert b"\r\n" not in path.read_bytes()
+
+
+def test_every_edge_carries_its_proven_term(crate, proven):
+    """The dashboard's 'favour mixes I have played' toggle subtracts this, so it
+    has to be present on every edge — including the many where it is zero."""
+    g = build_graph(crate, proven, top_k=10)
+    for row in g["edges"]:
+        for edge in row:
+            assert len(edge) == 3
+            assert 0.0 <= edge[2] <= W_PROVEN + 1e-9
