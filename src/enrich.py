@@ -388,3 +388,34 @@ def load_track_features(
             "INSERT INTO track_features VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", rows
         )
     return CoverageReport(total=len(rows), by_source=by_source)
+
+
+def load_camelot_moves(con: duckdb.DuckDBPyConnection) -> int:
+    """Materialise the full 24x24 Camelot move table into DuckDB.
+
+    The SQL models need to know whether a transition is harmonically clean, and
+    there are exactly two ways to arrange that: reimplement the wheel's modular
+    arithmetic in SQL, or generate the lookup from the Python that is already
+    tested. The second option is taken here — 576 rows is nothing, and it makes
+    drift between the two implementations structurally impossible rather than
+    something a parity test has to catch after the fact.
+    """
+    from .harmonic import MOVE_SCORES, classify_move, is_compatible  # local: avoids cycle
+
+    keys = [CamelotKey(n, l) for n in range(1, 13) for l in ("A", "B")]
+    rows = [
+        (a.code, b.code, classify_move(a, b),
+         MOVE_SCORES[classify_move(a, b)], is_compatible(a, b))
+        for a in keys for b in keys
+    ]
+    con.execute("""
+        CREATE OR REPLACE TABLE camelot_moves (
+            from_code    VARCHAR,
+            to_code      VARCHAR,
+            move         VARCHAR,
+            move_score   DOUBLE,
+            is_harmonic  BOOLEAN
+        )
+    """)
+    con.executemany("INSERT INTO camelot_moves VALUES (?, ?, ?, ?, ?)", rows)
+    return len(rows)
