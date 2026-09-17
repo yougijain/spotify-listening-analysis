@@ -8,10 +8,16 @@ The objective
 -------------
 Every transition A -> B is scored on four things, weighted (SPEC §9.2):
 
-    harmonic   do the keys mix                       (Camelot move score)
-    tempo      can I pitch one into the other        (+/- 6% fader, half/double ok)
-    energy     does B sit where the arc wants it     (warmup / peak / journey / closing)
-    quality    is B worth playing at all             (crate set-readiness)
+    harmonic    do the keys mix                      (Camelot move score)
+    tempo       can I pitch one into the other       (+/- 6% fader, half/double ok)
+    energy      does B sit where the arc wants it    (warmup / peak / journey / closing)
+    continuity  is the step up or down survivable    (no cliff between neighbours)
+    quality     is B worth playing at all            (crate set-readiness)
+
+Continuity earns its place: an objective that only scores distance-from-target
+will happily drop from 0.9 to 0.2 and back if each track individually sits near
+the arc, which on a floor reads as the set falling over. Arc fit is a shape
+constraint; continuity is a local one, and both are needed.
 
 plus a bonus when the pair appears in the observed transition graph and held —
 a mix already proven on my own ears beats one that merely scores well.
@@ -53,10 +59,16 @@ from .harmonic import (
 )
 
 # Objective weights. They sum to 1 so a transition score is readable as 0..1.
-W_HARMONIC = 0.35
-W_TEMPO = 0.25
+W_HARMONIC = 0.30
+W_TEMPO = 0.20
 W_ENERGY = 0.20
-W_QUALITY = 0.20
+W_CONTINUITY = 0.12
+W_QUALITY = 0.18
+
+# Energy step a mix absorbs without anyone noticing. Beyond this the penalty
+# ramps, hitting zero at ENERGY_CLIFF.
+ENERGY_STEP_FREE = 0.15
+ENERGY_CLIFF = 0.55
 
 # Extra credit for a pair I have actually played back-to-back and stayed with.
 # Deliberately small: it should break ties, not override the musical scoring,
@@ -110,6 +122,7 @@ class Transition:
     harmonic: float
     tempo: float
     energy: float
+    continuity: float
     quality: float
     proven: float
     move: Optional[str]
@@ -144,6 +157,26 @@ class SetPlan:
             return 0.0
         clean = sum(1 for t in scored if t.move in ("same_key", "adjacent", "relative"))
         return clean / len(scored)
+
+    def arc_deviation(self, arc: str) -> float:
+        """Mean absolute gap between the set's energy and the arc it targeted.
+
+        The number that keeps the arc claim honest: a set can be 100% harmonic
+        and still ignore the shape it was asked for.
+        """
+        energies = [(i, t.energy) for i, t in enumerate(self.tracks)
+                    if t.energy is not None]
+        if not energies:
+            return 0.0
+        n = len(self.tracks)
+        return sum(abs(e - arc_target(arc, i, n)) for i, e in energies) / len(energies)
+
+    def max_energy_step(self) -> float:
+        """Biggest energy jump between neighbouring tracks."""
+        energies = [t.energy for t in self.tracks if t.energy is not None]
+        if len(energies) < 2:
+            return 0.0
+        return max(abs(b - a) for a, b in zip(energies, energies[1:]))
 
     def describe(self) -> str:
         lines = [f"{len(self.tracks)} tracks · {self.minutes:.0f} min · "
@@ -185,19 +218,37 @@ def score_transition(
     harmonic = harmonic_score(a.key, b.key)
     tempo = bpm_score(a.bpm, b.bpm)
     energy_fit = _energy_fit(b, arc, position, total)
+    continuity = energy_continuity(a.energy, b.energy)
     quality = b.set_readiness
 
     total_score = (
         W_HARMONIC * harmonic
         + W_TEMPO * tempo
         + W_ENERGY * energy_fit
+        + W_CONTINUITY * continuity
         + W_QUALITY * quality
         + W_PROVEN * proven
     )
     move = classify_move(a.key, b.key) if (a.key and b.key) else None
     delta = _bpm_delta_or_none(a.bpm, b.bpm)
     return Transition(a.track_key, b.track_key, total_score, harmonic, tempo,
-                      energy_fit, quality, proven, move, delta)
+                      energy_fit, continuity, quality, proven, move, delta)
+
+
+def energy_continuity(from_energy: Optional[float], to_energy: Optional[float]) -> float:
+    """1..0 for how survivable the energy step between two tracks is.
+
+    Free inside ``ENERGY_STEP_FREE``, then linear to 0 at ``ENERGY_CLIFF``.
+    Unknown energy is neutral, like every other missing feature.
+    """
+    if from_energy is None or to_energy is None:
+        return 0.5
+    step = abs(to_energy - from_energy)
+    if step <= ENERGY_STEP_FREE:
+        return 1.0
+    if step >= ENERGY_CLIFF:
+        return 0.0
+    return 1.0 - (step - ENERGY_STEP_FREE) / (ENERGY_CLIFF - ENERGY_STEP_FREE)
 
 
 def _energy_fit(track: Track, arc: str, position: int, total: int) -> float:
@@ -353,6 +404,126 @@ def _pick_openers(
         key=lambda t: (_energy_fit(t, arc, 0, slots), t.set_readiness), reverse=True
     )
     return eligible[:beam_width]
+
+
+# --- can the crate even do this? -------------------------------------------
+
+# How far from an arc's target a track can sit and still serve that slot.
+ARC_TOLERANCE = 0.15
+# Tracks needed within tolerance before a slot counts as properly supplied.
+# Fewer than this and the optimiser has no real choice, so the other
+# constraints (artist gap, tempo, key) will force a compromise somewhere.
+ARC_DEPTH = 8
+
+
+@dataclass(frozen=True)
+class ArcFeasibility:
+    """Whether the crate contains material an arc asks for *and can reach*.
+
+    Worth computing before blaming the sequencer. A crate that is 90% peak-time
+    material cannot open a night, and no amount of search fixes that — the
+    honest output is "you are missing opener material", not a warmup set
+    assembled out of bangers.
+
+    Reachability is the part that is easy to get wrong. Counting tracks by
+    energy alone says the crate is fine, because the quiet tracks do exist —
+    they are just downtempo, and you cannot get from a 137 BPM floor to a 92 BPM
+    track through a +/-8% pitch fader. Energy and tempo are correlated in any
+    real crate, so a slot is only genuinely supplied if its candidates are also
+    tempo-reachable from where the set is running.
+    """
+
+    arc: str
+    mean_supply: float
+    worst_slot: int
+    worst_supply: float
+    worst_target: float
+    n_slots: int
+    reference_bpm: Optional[float]
+    stranded: int
+
+    @property
+    def verdict(self) -> str:
+        if self.worst_supply >= 1.0:
+            return "well supplied"
+        if self.worst_supply >= 0.5:
+            return "thin in places"
+        return "not supported by this crate"
+
+    def summary(self) -> str:
+        stranded = (f", {self.stranded} on-energy tracks stranded out of tempo range"
+                    if self.stranded else "")
+        return (f"{self.arc}: {self.verdict} "
+                f"(mean supply {self.mean_supply:.0%}, thinnest at slot "
+                f"{self.worst_slot + 1}/{self.n_slots} wanting energy "
+                f"{self.worst_target:.2f}{stranded})")
+
+
+def _median(values: Sequence[float]) -> Optional[float]:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def arc_feasibility(
+    tracks: Sequence[Track],
+    arc: str = "peak",
+    target_minutes: float = 60.0,
+    tolerance: float = ARC_TOLERANCE,
+    depth: int = ARC_DEPTH,
+    reference_bpm: Optional[float] = None,
+    max_drift: float = DEFAULT_MAX_DRIFT,
+) -> ArcFeasibility:
+    """Measure, slot by slot, how much *reachable* material the crate has.
+
+    ``reference_bpm`` is where the set is assumed to be running; it defaults to
+    the crate's median tempo. A candidate counts toward a slot only if it is
+    both within ``tolerance`` of that slot's energy target and within
+    ``max_drift`` of the reference tempo (half- and double-time allowed).
+
+    Supply is capped at 1.0 per slot: having 40 candidates where 8 would do is
+    not four times better, it just means that slot is solved.
+    """
+    usable = [t for t in tracks if t.energy is not None]
+    slots = _slots_for(target_minutes, tracks) if tracks else 0
+    if not usable or slots < 1:
+        return ArcFeasibility(arc, 0.0, 0, 0.0, 0.0, slots, reference_bpm, 0)
+
+    if reference_bpm is None:
+        reference_bpm = _median([t.bpm for t in usable if t.bpm])
+
+    def reachable(track: Track) -> bool:
+        if reference_bpm is None or track.bpm is None:
+            return True                  # untagged tempo is not held against it
+        delta = _bpm_delta_or_none(reference_bpm, track.bpm)
+        return delta is None or delta <= max_drift
+
+    supplies, stranded = [], set()
+    for i in range(slots):
+        target = arc_target(arc, i, slots)
+        # Epsilon because a track exactly on the tolerance boundary should
+        # count: abs(0.90 - 0.75) is 0.15000000000000002 in binary floating
+        # point, and a slot flipping to "unsupplied" on that is nonsense.
+        on_energy = [t for t in usable if abs(t.energy - target) <= tolerance + 1e-9]
+        within = [t for t in on_energy if reachable(t)]
+        stranded.update(t.track_key for t in on_energy if not reachable(t))
+        supplies.append((min(1.0, len(within) / depth), target))
+
+    worst_slot = min(range(slots), key=lambda i: supplies[i][0])
+    return ArcFeasibility(
+        arc=arc,
+        mean_supply=sum(s for s, _ in supplies) / slots,
+        worst_slot=worst_slot,
+        worst_supply=supplies[worst_slot][0],
+        worst_target=supplies[worst_slot][1],
+        n_slots=slots,
+        reference_bpm=reference_bpm,
+        stranded=len(stranded),
+    )
 
 
 # --- baselines and evaluation ----------------------------------------------

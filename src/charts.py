@@ -150,10 +150,197 @@ def concentration(con: duckdb.DuckDBPyConnection) -> Path:
     return _save(fig, "concentration.png")
 
 
+
+
+# --- DJ figures (SPEC §8-9) -------------------------------------------------
+
+# A second accent for the DJ-side charts, so crate/transition figures read as a
+# distinct family from the listening-behaviour ones.
+DECK = "#7c5cff"
+WARN = "#e8574a"
+
+
+def camelot_wheel(con: duckdb.DuckDBPyConnection) -> Path:
+    """Crate coverage around the Camelot wheel.
+
+    Polar on purpose: the wheel's whole point is that neighbours mix, so the
+    gaps in a crate are a spatial fact and a bar chart hides them. Inner ring is
+    minor (A), outer is major (B).
+    """
+    d = con.execute("""
+        SELECT camelot_number, camelot_letter, n_tracks, avg_readiness
+        FROM crate_key_coverage
+    """).df()
+
+    counts = {(int(r.camelot_number), r.camelot_letter): int(r.n_tracks)
+              for _, r in d.iterrows()}
+    biggest = max(counts.values()) if counts else 1
+
+    fig, ax = plt.subplots(figsize=(6.4, 6.4), subplot_kw={"projection": "polar"})
+    ax.set_theta_zero_location("N")
+    ax.set_theta_direction(-1)
+    width = 2 * np.pi / 12
+
+    for letter, radius, colour in (("A", 0.55, DECK), ("B", 1.15, ACCENT)):
+        for number in range(1, 13):
+            theta = (number - 1) * width
+            n = counts.get((number, letter), 0)
+            ax.bar(theta, 0.5, width=width * 0.92, bottom=radius,
+                   color=colour, alpha=0.12 + 0.78 * (n / biggest),
+                   edgecolor="white", linewidth=1.2)
+            if n:
+                ax.text(theta, radius + 0.25, str(n), ha="center", va="center",
+                        fontsize=7.5, color="white" if n > biggest * 0.45 else INK)
+
+    ax.set_xticks([(i - 1) * width for i in range(1, 13)])
+    ax.set_xticklabels([str(i) for i in range(1, 13)], fontsize=9)
+    ax.set_yticks([])
+    ax.set_ylim(0, 1.75)
+    ax.grid(False)
+    ax.spines["polar"].set_visible(False)
+    ax.set_title("Crate coverage around the Camelot wheel\n"
+                 "inner = minor (A), outer = major (B)", pad=18)
+    return _save(fig, "camelot_wheel.png")
+
+
+def transition_performance(con: duckdb.DuckDBPyConnection) -> Path:
+    """Skip rate by harmonic move, with Wilson bounds on the hold rate."""
+    d = con.execute("""
+        SELECT move, n, skip_rate, hold_lcb
+        FROM transition_move_performance
+        ORDER BY skip_rate
+    """).df()
+
+    fig, ax = plt.subplots(figsize=(8.4, 4.2))
+    compatible = {"same_key", "adjacent", "relative"}
+    colours = [ACCENT if m in compatible else WARN for m in d.move]
+    bars = ax.barh(d.move.str.replace("_", " "), d.skip_rate * 100, color=colours)
+    for bar, n in zip(bars, d.n):
+        ax.text(bar.get_width() + 0.6, bar.get_y() + bar.get_height() / 2,
+                f"{bar.get_width():.1f}%  (n={n:,})", va="center", fontsize=8.5,
+                color=INK)
+    ax.set_title("Does the next track survive? Skip rate by harmonic move")
+    ax.set_xlabel("skip rate of the incoming track (%)")
+    ax.set_xlim(0, max(d.skip_rate * 100) * 1.35)
+    ax.grid(axis="y", visible=False)
+    green = plt.Rectangle((0, 0), 1, 1, color=ACCENT)
+    red = plt.Rectangle((0, 0), 1, 1, color=WARN)
+    ax.legend([green, red], ["harmonically compatible", "clash"],
+              frameon=False, fontsize=8.5, loc="lower right")
+    return _save(fig, "transition_performance.png")
+
+
+def crate_health(con: duckdb.DuckDBPyConnection) -> Path:
+    """Hold rate against rotation burn: the two axes a crate decision turns on.
+
+    Worth reading carefully, because the obvious expectation is wrong: the
+    burned tracks sit at the TOP right, not the bottom. They are flogged
+    *because* they hold — reliability is what earns a track its overplay. So
+    "rest these" is not a quality judgement, it is a freshness one, and the
+    left-hand column is where a set that does not sound like last month's set
+    has to come from.
+    """
+    d = con.execute("""
+        SELECT hold_lcb, rotation_burn, n_plays, crate_status FROM crate
+    """).df()
+
+    fig, ax = plt.subplots(figsize=(8.2, 5.2))
+    palette = {"proven": ACCENT, "working": "#4a90d9", "rested": DECK,
+               "unproven": MUTED, "risky": "#f0a202", "burned": WARN}
+    for status, colour in palette.items():
+        sub = d[d.crate_status == status]
+        if sub.empty:
+            continue
+        ax.scatter(sub.rotation_burn, sub.hold_lcb, s=8 + sub.n_plays * 0.45,
+                   alpha=0.62, color=colour, edgecolors="none", label=status)
+
+    ax.axhline(0.5, color=MUTED, lw=0.8, ls="--")
+    ax.axvline(0.85, color=MUTED, lw=0.8, ls="--")
+    ax.text(0.03, 0.94, "rested + reliable\n→ play these", fontsize=8.5,
+            color=INK, va="top")
+    ax.text(0.97, 0.06, "flogged + unreliable\n→ rest these", fontsize=8.5,
+            color=WARN, ha="right", va="bottom")
+    ax.set_title("Crate health: does it hold, and have I flogged it?")
+    ax.set_xlabel("rotation burn (percentile of recency-weighted plays)")
+    ax.set_ylabel("hold rate, Wilson lower bound")
+    ax.set_xlim(-0.03, 1.03)
+    ax.set_ylim(-0.03, 1.03)
+    ax.legend(frameon=False, fontsize=8, ncol=3, loc="lower left")
+    return _save(fig, "crate_health.png")
+
+
+def set_energy_arc(con: duckdb.DuckDBPyConnection) -> Path:
+    """Built sets against the arcs they targeted — including where it fails.
+
+    The peak panel tracks its arc closely; the warmup panel does not, and that
+    is the point of showing both. The crate is 90% house/techno/dnb, so the
+    quiet tracks a warmup needs are downtempo and sit outside the pitch fader's
+    reach from where the set is running. That is a gap in the record bag, not a
+    bug in the sequencer, and the feasibility number in each title says which.
+    """
+    from .harmonic import arc_target
+    from .setbuilder import arc_feasibility, build_set, load_crate, load_proven_edges
+
+    crate = load_crate(con)
+    edges = load_proven_edges(con)
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.5, 4.6), sharey=True)
+    for ax, arc in zip(axes, ("peak", "warmup")):
+        plan = build_set(crate, target_minutes=60, arc=arc, proven_edges=edges)
+        feas = arc_feasibility(crate, arc, target_minutes=60)
+        n = len(plan.tracks)
+        xs = list(range(n))
+        target = [arc_target(arc, i, n) for i in xs]
+        actual = [t.energy if t.energy is not None else np.nan for t in plan.tracks]
+        ok = feas.worst_supply >= 0.5
+
+        ax.plot(xs, target, color=MUTED, lw=1.6, ls="--", label=f"{arc} target")
+        ax.plot(xs, actual, color=DECK if ok else WARN, lw=2, marker="o", ms=4,
+                label="built set")
+        ax.fill_between(xs, target, actual, color=DECK if ok else WARN, alpha=0.10)
+        ax.set_title(f"{arc}  ·  crate supply {feas.mean_supply:.0%}\n"
+                     f"arc miss {plan.arc_deviation(arc):.2f}  ·  "
+                     f"{plan.harmonic_rate:.0%} harmonic", fontsize=10.5)
+        ax.set_xlabel("slot in set")
+        ax.legend(frameon=False, fontsize=8, loc="lower right")
+    axes[0].set_ylabel("energy")
+    axes[0].set_ylim(0, 1.05)
+    fig.suptitle("The sequencer hits the arc it has material for",
+                 y=1.03, fontsize=12, fontweight="bold")
+    return _save(fig, "set_energy_arc.png")
+
+
+def tempo_bands(con: duckdb.DuckDBPyConnection) -> Path:
+    """What the crate can actually play, by tempo band."""
+    d = con.execute("""
+        SELECT band, n_tracks, avg_readiness FROM crate_tempo_bands
+    """).df()
+    order = ["<100 downtempo", "100-117 slow", "118-129 house",
+             "130-144 techno", "145+ fast", "untagged"]
+    d["rank"] = d.band.apply(lambda b: order.index(b) if b in order else 99)
+    d = d.sort_values("rank")
+
+    fig, ax = plt.subplots(figsize=(8.4, 4.0))
+    colours = [MUTED if b == "untagged" else ACCENT for b in d.band]
+    bars = ax.bar(d.band, d.n_tracks, color=colours)
+    for bar, r in zip(bars, d.avg_readiness):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.8,
+                f"{r:.2f}", ha="center", fontsize=8.5, color=INK)
+    ax.set_title("Crate depth by tempo band  (number = mean set-readiness)")
+    ax.set_ylabel("tracks")
+    ax.grid(axis="x", visible=False)
+    plt.setp(ax.get_xticklabels(), rotation=12, ha="right")
+    return _save(fig, "tempo_bands.png")
+
+
 def render_all(con: duckdb.DuckDBPyConnection) -> list:
     return [
+        # Listening behaviour (SPEC §7)
         volume_trend(con), hour_dow_heatmap(con), skip_breakdown(con),
         cohort_retention(con), discovery_trend(con), concentration(con),
+        # Crate and set construction (SPEC §8-9)
+        camelot_wheel(con), transition_performance(con), crate_health(con),
+        tempo_bands(con), set_energy_arc(con),
     ]
 
 

@@ -315,3 +315,121 @@ def test_a_real_set_from_the_real_crate_holds_together(con):
     assert plan.harmonic_rate > 0.75
     assert plan.mean_score > 0.6
     assert 45 <= plan.minutes <= 80
+
+
+# --- energy continuity -----------------------------------------------------
+
+def test_energy_continuity_is_free_for_small_steps():
+    from src.setbuilder import energy_continuity
+
+    assert energy_continuity(0.70, 0.75) == 1.0
+    assert energy_continuity(0.70, 0.70) == 1.0
+
+
+def test_energy_continuity_punishes_a_cliff():
+    from src.setbuilder import energy_continuity
+
+    assert energy_continuity(0.90, 0.20) == 0.0
+    assert 0.0 < energy_continuity(0.90, 0.55) < 1.0
+
+
+def test_energy_continuity_is_symmetric_and_neutral_when_unknown():
+    from src.setbuilder import energy_continuity
+
+    assert energy_continuity(0.9, 0.5) == energy_continuity(0.5, 0.9)
+    assert energy_continuity(None, 0.5) == 0.5
+
+
+def test_continuity_makes_the_sequencer_avoid_energy_cliffs():
+    """The regression this term was added for: without it the optimiser was
+    happy to drop 0.9 -> 0.2 -> 0.9 as long as each track sat near the arc."""
+    crate = a_crate(80)
+    plan = build_set(crate, target_minutes=60, arc="peak")
+    assert plan.max_energy_step() < 0.5
+
+
+def test_a_smooth_step_outscores_a_cliff_all_else_equal():
+    src = track("a", energy=0.80, camelot="8A", bpm=128)
+    smooth = score_transition(src, track("b", energy=0.78, camelot="8A", bpm=128),
+                              1, 10, "peak")
+    cliff = score_transition(src, track("c", energy=0.25, camelot="8A", bpm=128),
+                             1, 10, "peak")
+    assert smooth.continuity > cliff.continuity
+    assert smooth.score > cliff.score
+
+
+# --- arc feasibility -------------------------------------------------------
+
+def test_a_crate_of_bangers_cannot_support_a_warmup():
+    from src.setbuilder import arc_feasibility
+
+    peak_only = [track(f"k{i}", artist=f"A{i}", energy=0.9, bpm=138,
+                       camelot=f"{(i % 12) + 1}A") for i in range(60)]
+    assert arc_feasibility(peak_only, "peak").worst_supply >= 1.0
+    assert arc_feasibility(peak_only, "warmup").verdict == "not supported by this crate"
+
+
+def test_feasibility_counts_tempo_stranded_material_as_unavailable():
+    """The distinction the naive version missed.
+
+    The quiet tracks exist, but at 92 BPM they are out of fader reach from a
+    138 BPM set, so they cannot actually serve a warmup slot.
+    """
+    from src.setbuilder import arc_feasibility
+
+    crate = (
+        [track(f"loud{i}", artist=f"L{i}", energy=0.9, bpm=138) for i in range(40)]
+        + [track(f"quiet{i}", artist=f"Q{i}", energy=0.32, bpm=92) for i in range(40)]
+    )
+    by_energy_only = arc_feasibility(crate, "warmup", reference_bpm=None, max_drift=10.0)
+    reachable = arc_feasibility(crate, "warmup")
+    assert by_energy_only.mean_supply > reachable.mean_supply
+    assert reachable.stranded > 0
+
+
+def test_feasibility_predicts_where_the_set_will_miss_its_arc(con):
+    """Validates the diagnostic against the thing it claims to predict."""
+    from src.setbuilder import arc_feasibility
+
+    crate = load_crate(con)
+    scored = [
+        (arc_feasibility(crate, arc, 60).mean_supply,
+         build_set(crate, 60, arc).arc_deviation(arc))
+        for arc in ("warmup", "peak", "journey", "closing")
+    ]
+    best_supply = max(scored, key=lambda p: p[0])
+    worst_supply = min(scored, key=lambda p: p[0])
+    assert best_supply[1] < worst_supply[1], "better-supplied arcs should miss less"
+
+
+def test_feasibility_handles_an_empty_or_untagged_crate():
+    from src.setbuilder import arc_feasibility
+
+    assert arc_feasibility([], "peak").mean_supply == 0.0
+    untagged = [track(f"k{i}", artist=f"A{i}", energy=None) for i in range(10)]
+    assert arc_feasibility(untagged, "peak").mean_supply == 0.0
+
+
+def test_feasibility_summary_names_the_thin_slot():
+    from src.setbuilder import arc_feasibility
+
+    peak_only = [track(f"k{i}", artist=f"A{i}", energy=0.9, bpm=138) for i in range(60)]
+    text = arc_feasibility(peak_only, "warmup").summary()
+    assert "warmup" in text and "slot" in text
+
+
+# --- plan diagnostics ------------------------------------------------------
+
+def test_arc_deviation_is_zero_for_a_perfectly_matched_set():
+    from src.harmonic import arc_target
+
+    n = 6
+    tracks = [track(f"k{i}", artist=f"A{i}", energy=arc_target("peak", i, n))
+              for i in range(n)]
+    assert SetPlan(tracks=tracks).arc_deviation("peak") == pytest.approx(0.0)
+
+
+def test_arc_deviation_and_max_step_handle_missing_energy():
+    p = SetPlan(tracks=[track("a", energy=None), track("b", energy=None)])
+    assert p.arc_deviation("peak") == 0.0
+    assert p.max_energy_step() == 0.0
