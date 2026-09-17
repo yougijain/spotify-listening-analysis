@@ -7,7 +7,7 @@ about it. What I need before a gig is narrower: **which tracks hold a room**,
 So I pointed a product-analytics pipeline at three years of my own Spotify
 history and made it answer those three questions.
 
-**[→ Live dashboard](https://crate-intelligence.vercel.app)** · the set builder
+**[→ Live dashboard](https://crate-intelligence-yougijain.vercel.app)** · the set builder
 runs in your browser.
 **[→ REPORT.md](REPORT.md)** for the auto-generated findings ·
 **[→ SPEC.md](SPEC.md)** for the build spec.
